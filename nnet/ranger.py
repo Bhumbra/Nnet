@@ -561,3 +561,4 @@ def unpoolaxes(X, _E, _O):
   return x.reshape( np.hstack((P, np.prod(Q), np.prod(E))) )
 
 #-------------------------------------------------------------------------------
+
