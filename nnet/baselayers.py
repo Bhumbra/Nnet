@@ -34,7 +34,8 @@ class feedLayer (object):
   """
   dims = None     # layer dimensions within each feature map
   maps = None     # number of feature maps
-  size = None     # total number of nodes
+  size = None     # total number of nodes per feature map
+  Size = None     # total number of nodes across all features maps
   transfunc = None # transfer function string
   transfer = None  # transfer function
   transder = None  # transfer derivative
@@ -42,6 +43,7 @@ class feedLayer (object):
   input_dims = None    # Input layer dimensnions
   input_maps = None    # Input layer maps
   input_size = None    # Input layer size
+  input_Size = None    # Input layer size
   coef_shape = None     # Weighting coefficient dimensions
   offs_shape = None     # Bias offsets dimensions
   batch_size = None    # len(input_data)
@@ -99,7 +101,8 @@ class feedLayer (object):
       if self.maps is None:
         self.maps = 1
 
-    self.size = self.maps * np.prod(self.dims)
+    self.size = np.prod(self.dims)
+    self.Size = self.maps * self.size
     
   def setInput(self, *args):
     """
@@ -116,6 +119,7 @@ class feedLayer (object):
     self.input_dims = None    
     self.input_maps = None    
     self.input_size = None
+    self.input_Size = None
     for arg in args:
       if isinstance(arg, feedLayer):
         self.input_layer = arg
@@ -131,8 +135,10 @@ class feedLayer (object):
 
     # If present layers has no dimensions, return
     if self.dims is None: 
-      self.input_size = 1 if self.input_maps is None else self.input_maps
-      if self.input_dims is not None: self.input_size *= np.prod(self.input_dims)
+      if self.input_maps is None: self.input_maps = 1
+      if self.input_dims is not None: 
+        self.input_size = np.prod(self.input_dims)
+        self.input_Size = self.input_maps * self.input.size
       return
 
     # If no inputs has been specified, default dimensions and maps
@@ -140,7 +146,8 @@ class feedLayer (object):
     if self.input_dims is None: self.input_dims = self.dims
     if self.input_maps is None: self.input_maps = self.maps
 
-    self.input_size = self.input_maps * np.prod(self.input_dims)
+    self.input_size = np.prod(self.input_dims)
+    self.input_Size = self.input_maps * self.input_size 
 
     # Initialise parameters
 
@@ -182,8 +189,8 @@ class feedLayer (object):
     if self.dims is None or self.input_dims is None: return
     if self.maps is None: self.maps = 1
 
-    self.coef_shape = np.atleast_1d([self.size, self.input_size])
-    self.offs_shape = np.atleast_1d(self.size)
+    self.coef_shape = np.atleast_1d([self.maps, self.size, self.input_size])
+    self.offs_shape = np.atleast_1d([self.maps, 1, self.size])
 
     if self.maps > 1:
       warnings.warn("baseLayer.forward() does not support multiple features maps.")
@@ -224,13 +231,13 @@ class feedLayer (object):
       self.setBatchSize(_batch_size)
 
     # Test shape of input data and reshape according to expected input dimensionality
-    if np.prod(_input_data.shape[1:]) != self.input_size:
+    if np.prod(_input_data.shape[1:]) != self.input_Size:
       raise ValueError("Input data dimensions incommensurate with specified archecture")
     
-    self.input_data = _input_data.reshape([self.batch_size, self.input_size])
+    self.input_data = _input_data.reshape([self.batch_size, self.input_maps, self.input_size])
       
     # Now the matrix multiplication, offsetting, and transfer function
-    self.scores = np.dot(self.weight_coefs, self.input_data.T).T + self.bias_offsets
+    self.scores = np.einsum("kij,hij->hki", self.weight_coefs, self.input_data) + self.bias_offsets
     self.output = self.scores if self.transfer is None else self.transfer(self.scores)
 
     return self.output
@@ -278,18 +285,17 @@ class BackLayer (feedLayer):
       warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
-    if np.prod(_output_data.shape[1:]) != self.size:
+    if np.prod(_output_data.shape[1:]) != self.Size:
       raise ValueError("Output data dimensions incommensurate with specified archecture")
     
     # Reshape data and calculate derivatives
 
-    self.output_data = _output_data.reshape([self.batch_size, self.size])
+    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
     if self.transder is None:
       self.derivative = self.output_data 
     else:
       self.derivative = self.output_data * self.transder(self.scores, self.output)
-    #self.gradient = np.array([np.dot(self.derivative[i].reshape([self.size, 1]), self.input_data[i].reshape([1, self.input_size])) for i in range(self.batch_size)])
-    self.gradient = np.einsum('ij,ik->ijk', self.derivative, self.input_data)
+    self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
     self.back_data = np.dot(self.derivative, self.weight_coefs)

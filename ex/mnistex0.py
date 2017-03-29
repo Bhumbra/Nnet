@@ -5,7 +5,7 @@ import numpy as np
 # Single layer MNIST test
 
 eta = 0.1
-bs = 100
+bs = 12
 epochs = 10
 
 print("Loading MNIST data")
@@ -39,7 +39,7 @@ for i in range(epochs):
     done = end >= len(input_data)
     k += 1
   output = self.forward(test_input_data)
-  output_ind = np.argmax(output, axis = 1)
+  output_ind = np.argmax(output, axis = 2).ravel()
   accuracy = 100. * len(np.nonzero(output_ind == test_output_data)[0])/float(len(output))
 
   print("".join( (str(i+1), '/', str(epochs), " accuracy: ", str(accuracy), "%" ) ) )

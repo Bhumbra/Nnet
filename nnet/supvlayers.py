@@ -57,16 +57,15 @@ class CostLayer (BackLayer):
       warnings.warn("CostLayer.backward() batch size not matched by Backlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
-    if np.prod(_output_data.shape[1:]) != self.size:
+    if np.prod(_output_data.shape[1:]) != self.Size:
       raise ValueError("Output data dimensions incommensurate with specified archecture")
     
     # Reshape data and calculate costs and derivatives
-    self.output_data = _output_data.reshape([self.batch_size, self.size])
+    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
     self.cost_data = self.costfun(self.output_data, self.output)
 
     self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
-    #self.gradient = np.array([np.dot(self.derivative[i].reshape([self.size, 1]), self.input_data[i].reshape([1, self.input_size])) for i in range(self.batch_size)])
-    self.gradient = np.einsum('ij,ik->ijk', self.derivative, self.input_data)
+    self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
     self.back_data = np.dot(self.derivative, self.weight_coefs)
