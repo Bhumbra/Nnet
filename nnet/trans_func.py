@@ -3,6 +3,9 @@
 # may contain the result of the transfer function if it not used.
 
 # Gary Bhumbra
+
+import numpy as np
+
 #-------------------------------------------------------------------------------
 def sigval(x, expmin = -69.):
   y = np.zeros(x.shape, dtype = float)

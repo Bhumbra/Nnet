@@ -7,7 +7,7 @@ and unsupervised nodal networks.
 
 import warnings
 import numpy as np
-import nnet.trans_func
+import nnet.trans_func as trans_func
 from dtypes import *
 
 #-------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ class feedLayer (object):
   It is camel-cased because it is not intended to be used natively but as a base class
   for an inheriting class. However it can be invoked:
   
-  self = baseLayer(*args)
+  self = feedLayer(*args)
   
   where for args:
 
@@ -117,7 +117,7 @@ class feedLayer (object):
     self.input_maps = None    
     self.input_size = None
     for arg in args:
-      if isinstance(arg, BaseLayer):
+      if isinstance(arg, feedLayer):
         self.input_layer = arg
         self.input_dims = arg.dims
         self.input_maps = arg.maps
@@ -163,7 +163,7 @@ class feedLayer (object):
     self.transfer = None
     self.transder = None
     nargs = len(args)
-    if ~args:
+    if not(nargs):
       pass
     elif nargs == 1:
       if type(args[0]) is str:
@@ -188,7 +188,7 @@ class feedLayer (object):
     if self.maps > 1:
       warnings.warn("baseLayer.forward() does not support multiple features maps.")
 
-  def initParams(self, _weight_coefs = None, _bias_offsets = 0.):
+  def initParams(self, _weight_coefs = 1., _bias_offsets = 0.):
     self.weight_coefs = None
     self.bias_offsets = None
    
@@ -202,27 +202,11 @@ class feedLayer (object):
       if np.any(self.offs_shape != self.bias_offsets):
         raise ValueError("Offset array of unexpected dimensions.")
 
-    if _weight_coefs is None:
-      invprod = .5 / float(np.maximum(1, self.maps * np.prod(self.dims)) )
-      _weight_coefs = [-invprod, invprod]
-
     if self.weight_coefs is None:
-      _weight_coefs = np.atleast_1d(_weight_coefs)
-      if len(_weight_coefs) == 1:
-        self.weight_coefs = np.tile(_weight_coefs[0], self.coef_shape)
-      elif len(_weight_coefs) == 2:
-        self.weight_coefs = np.diff(_weight_coefs) * (np.random.uniform(size = self.coef_shape)-_weight_coefs[0])
-      else:
-        raise Value("Unknown weight coefficient initialisation specification.")
+      self.weight_coefs = _weight_coefs * (np.random.uniform(size = self.coef_shape) - 0.5)
 
     if self.bias_offsets is None:
-      _bias_offsets = np.atleast_1d(_bias_offsets)
-      if len(_bias_offsets) == 1:
-        self.bias_offsets = np.tile(_bias_offsets[0], self.offs_shape)
-      elif len(_bias_offsets) == 2:
-        self.bias_offsets = np.diff(_bias_offsets) * (np.random.uniform(size = self.offs_shape)-_bias_offsets[0])
-      else:
-        raise Value("Unknown bias offset initialisation specification.")
+      self.bias_offsets = _bias_offsets * (np.random.uniform(size = self.offs_shape) - 0.5)
 
   def setBatchSize(self, _batch_size = 1):
     """ 
@@ -289,8 +273,7 @@ class BackLayer (feedLayer):
     # Check batch-size 
     _output_data = np.asarray(_output_data)
     _batch_size = len(_output_data)
-    forwardMatches = self.batch_size == _batch_size
-    if ~forwardMatches:
+    if self.batch_size != _batch_size:
       self.setBatchSize(_batch_size)
       warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
 
@@ -299,16 +282,17 @@ class BackLayer (feedLayer):
       raise ValueError("Output data dimensions incommensurate with specified archecture")
     
     # Reshape data and calculate derivatives
+
     self.output_data = _output_data.reshape([self.batch_size, self.size])
-    if forwardMatches:
-      self.derivative = self.output_data if self.transfer is None else self.transder(self.output_data, self.scores)
-      self.gradient = self.derivative.T * self.input_data
-    else: 
-      self.derivative = self.output_data if self.transfer is None else self.transder(self.output_data)
-      self.gradient = None # cannot be calculated due mismatched input/output batch sizes
+    if self.transder is None:
+      self.derivative = self.output_data 
+    else:
+      self.derivative = self.output_data * self.transder(self.scores, self.output)
+    #self.gradient = np.array([np.dot(self.derivative[i].reshape([self.size, 1]), self.input_data[i].reshape([1, self.input_size])) for i in range(self.batch_size)])
+    self.gradient = np.einsum('ij,ik->ijk', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
-    self.back_data = self.derivative * self.coef_weights.T
+    self.back_data = np.dot(self.derivative, self.weight_coefs)
 
     return self.back_data
   
@@ -321,18 +305,18 @@ class BackLayer (feedLayer):
     if _eta is not None: self.eta = _eta
     if self.coef_shape is None: return None, None
     if self.offs_shape is None: return None, None
-    if self.derivate is None: return None, None
+    if self.derivative is None: return None, None
 
     # Check batch-size 
     _batch_size = len(self.derivative)
-    if self.batch_size != self.derivative:
+    if self.batch_size != _batch_size:
       self.setBatchSize(_batch_size)
       warnings.warn("BackLayer.update() batch size not matched by BackLayer.backward().")
 
     self.coef_delta = np.zeros(self.coef_shape, dtype = float)
     self.offs_delta = np.zeros(self.offs_shape, dtype = float)
 
-    if ~self.batch_size: 
+    if not(self.batch_size): 
       return self.coef_delta, self.offs_delta
 
     # Derivative first

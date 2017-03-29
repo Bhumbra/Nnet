@@ -4,8 +4,8 @@ A module with classes for supervised learning.
 
 # Gary Bhumbra.
 
-from baselayers import *
-import nnet.cost_func
+from nnet.baselayers import *
+import nnet.cost_func as cost_func
 
 class CostLayer (BackLayer):
   """
@@ -19,8 +19,8 @@ class CostLayer (BackLayer):
   costfun = None  # cost function
   costder = None  # cost derivative
 
-  def initialise(self, *args)
-    BackLayer.initialise(*args)
+  def initialise(self, *args):
+    BackLayer.initialise(self, *args)
     self.setCost()
 
   def setCost(self, *args):
@@ -28,13 +28,13 @@ class CostLayer (BackLayer):
     self.costfun = None
     self.costder = None
     nargs = len(args)
-    if ~args: 
+    if not(nargs): 
       self.costfunc = 'quad'
-      self.costfer, self.costder = cost_func.COST_FUNCTION_DERIVATIVE[self.costfunc]
+      self.costfun, self.costder = cost_func.COST_FUNCTION_DERIVATIVE[self.costfunc]
     elif nargs == 1:
       if type(args[0]) is str:
         self.costfunc = args[0].lower()
-        self.costfer, self.costder = cost_func.COST_FUNCTION_DERIVATIVE[self.costfunc]
+        self.costfun, self.costder = cost_func.COST_FUNCTION_DERIVATIVE[self.costfunc]
       else:
         raise ValueError("self.setCost single inputs must be a string") 
     elif nargs == 2:
@@ -54,7 +54,7 @@ class CostLayer (BackLayer):
     _batch_size = len(_output_data)
     if self.batch_size != _batch_size:
       self.setBatchSize(_batch_size)
-      warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
+      warnings.warn("CostLayer.backward() batch size not matched by Backlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
     if np.prod(_output_data.shape[1:]) != self.size:
@@ -65,10 +65,11 @@ class CostLayer (BackLayer):
     self.cost_data = self.costfun(self.output_data, self.output)
 
     self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
-    self.gradient = self.derivative.T * self.input_data
+    #self.gradient = np.array([np.dot(self.derivative[i].reshape([self.size, 1]), self.input_data[i].reshape([1, self.input_size])) for i in range(self.batch_size)])
+    self.gradient = np.einsum('ij,ik->ijk', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
-    self.back_data = self.derivative * self.coef_weights.T
+    self.back_data = np.dot(self.derivative, self.weight_coefs)
 
     return self.back_data
 
