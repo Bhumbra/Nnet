@@ -244,7 +244,7 @@ def intrapad(X, _d, x = 0.):
 #-------------------------------------------------------------------------------
 # Function of convenience for convolution/pooling operations.
 
-def stride(_X, _E = [], _S = []): 
+def strider(_X, _E = [], _S = []): 
   """
   Outputs `fancy-indexed' array XI (if first input floating point) or the 
   `fancy-indexing' array I itself (if first input integer) where: 

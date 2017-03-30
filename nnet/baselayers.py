@@ -29,6 +29,9 @@ class feedLayer (object):
   #2 any tuple, list, or ndarray specifies self.dims
   #3 any string (e.g. 'sigm', 'tanh', 'none', 'relu' specifies the transfer function)
   #4 a layer class specifies the relative input layer
+
+  Neggative specifications in case #2 can be used for relative downsizing from preceding
+  input layer.
  
   Note that feedfoward instances do not `own' the input_data.
   """
@@ -155,7 +158,7 @@ class feedLayer (object):
     # Initialise parameters
 
     self._setParamDims()
-    self.initParams()
+    self.setParams()
 
   def setTransfer(self, *args):
     """
@@ -192,6 +195,16 @@ class feedLayer (object):
     if self.dims is None or self.input_dims is None: return
     if self.maps is None: self.maps = 1
 
+    neg_dims = self.dims < 0
+
+    if len(self.dims) == len(self.input_dims):
+      if np.any(self.input_dims < 0):
+        warnings.warn("Negative dimension relative specification ambiguously defined.")
+      else:
+        self.dims[neg_dims] += self.input_dims[neg_dims]
+    elif np.any(neg_dims):
+      raise ValueError("Relative dimension specfication incommensurate with previous layer")
+
     if self.single_map:
       self.coef_shape = np.atleast_1d([self.size, self.input_size])
       self.offs_shape = np.atleast_1d([1, self.size])
@@ -199,10 +212,7 @@ class feedLayer (object):
       self.coef_shape = np.atleast_1d([self.maps, self.size, self.input_size])
       self.offs_shape = np.atleast_1d([self.maps, 1, self.size])
 
-    if self.maps > 1:
-      warnings.warn("baseLayer.forward() does not support multiple features maps.")
-
-  def initParams(self, _weight_coefs = 1., _bias_offsets = 0.):
+  def setParams(self, _weight_coefs = 1., _bias_offsets = 0.):
     self.weight_coefs = None
     self.bias_offsets = None
    
@@ -261,9 +271,10 @@ class feedLayer (object):
 #-------------------------------------------------------------------------------
 class BackLayer (feedLayer):
   """
-  This is a convenience feedforward + feedback class inheriting from feedlayer but
+  This is a generic feedforward + feedback class inheriting from feedlayer but
   with the additional facility of backward(). It is suitable for use as either a
-  first or hidden fully-connected layer, but not output layer.
+  first or hidden fully-connected layer, but not output layer as it supports
+  neither unsupervised or supervised learning paradigms.
   
   It is instantiated in the same way as feedLayer. 
 
