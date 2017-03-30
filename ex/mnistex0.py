@@ -39,7 +39,7 @@ for i in range(epochs):
     done = end >= len(input_data)
     k += 1
   output = self.forward(test_input_data)
-  output_ind = np.argmax(output, axis = 2).ravel()
+  output_ind = np.argmax(output, axis = -1).ravel()
   accuracy = 100. * len(np.nonzero(output_ind == test_output_data)[0])/float(len(output))
 
   print("".join( (str(i+1), '/', str(epochs), " accuracy: ", str(accuracy), "%" ) ) )

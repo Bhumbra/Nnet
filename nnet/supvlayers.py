@@ -49,23 +49,30 @@ class CostLayer (BackLayer):
     can be combined with backLayer.update() to update parameters.
     """
 
-    # Check batch-size 
     _output_data = np.asarray(_output_data)
+
+    # Check batch-size 
     _batch_size = len(_output_data)
-    if self.batch_size != _batch_size:
-      self.setBatchSize(_batch_size)
-      warnings.warn("CostLayer.backward() batch size not matched by Backlayer.forward().")
+    if self.batch_size != len(_output_data):
+      self.setBatchSize(_output_data)
+      warnings.warn("CostLayer.backward() batch size not matched by Costlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
     if np.prod(_output_data.shape[1:]) != self.Size:
       raise ValueError("Output data dimensions incommensurate with specified archecture")
     
     # Reshape data and calculate costs and derivatives
-    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
-    self.cost_data = self.costfun(self.output_data, self.output)
 
-    self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
-    self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
+    if self.single_map:
+      self.output_data = _output_data.reshape([self.batch_size, self.size])
+      self.cost_data = self.costfun(self.output_data, self.output)
+      self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
+      self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
+    else:
+      self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
+      self.cost_data = self.costfun(self.output_data, self.output)
+      self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
+      self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
     self.back_data = np.dot(self.derivative, self.weight_coefs)

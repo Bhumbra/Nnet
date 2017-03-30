@@ -47,6 +47,7 @@ class feedLayer (object):
   coef_shape = None     # Weighting coefficient dimensions
   offs_shape = None     # Bias offsets dimensions
   batch_size = None    # len(input_data)
+  single_map = None    # flag to denote unitary maps from previous and present layer
   input_data = None    # X
   weight_coefs = None  # W
   bias_offsets = None  # u
@@ -149,6 +150,8 @@ class feedLayer (object):
     self.input_size = np.prod(self.input_dims)
     self.input_Size = self.input_maps * self.input_size 
 
+    self.single_map = self.maps == 1 and self.input_maps == 1
+
     # Initialise parameters
 
     self._setParamDims()
@@ -189,8 +192,12 @@ class feedLayer (object):
     if self.dims is None or self.input_dims is None: return
     if self.maps is None: self.maps = 1
 
-    self.coef_shape = np.atleast_1d([self.maps, self.size, self.input_size])
-    self.offs_shape = np.atleast_1d([self.maps, 1, self.size])
+    if self.single_map:
+      self.coef_shape = np.atleast_1d([self.size, self.input_size])
+      self.offs_shape = np.atleast_1d([1, self.size])
+    else:
+      self.coef_shape = np.atleast_1d([self.maps, self.size, self.input_size])
+      self.offs_shape = np.atleast_1d([self.maps, 1, self.size])
 
     if self.maps > 1:
       warnings.warn("baseLayer.forward() does not support multiple features maps.")
@@ -223,21 +230,30 @@ class feedLayer (object):
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
 
   def forward(self, _input_data = []):
+    """
+    Forward-propagates data through layer. Outputs results from transfer function.
+    """
+
+    _input_data = np.asarray(_input_data)
 
     # Update self.batch_size if necessary
-    _input_data = np.asarray(_input_data)
-    _batch_size = len(_input_data)
-    if self.batch_size != _batch_size:
-      self.setBatchSize(_batch_size)
+    if self.batch_size != len(_input_data):
+      self.setBatchSize(_input_data)
 
     # Test shape of input data and reshape according to expected input dimensionality
     if np.prod(_input_data.shape[1:]) != self.input_Size:
       raise ValueError("Input data dimensions incommensurate with specified archecture")
     
-    self.input_data = _input_data.reshape([self.batch_size, self.input_maps, self.input_size])
-      
-    # Now the matrix multiplication, offsetting, and transfer function
-    self.scores = np.einsum("kij,hij->hki", self.weight_coefs, self.input_data) + self.bias_offsets
+    # Forward operaion
+
+    if self.single_map: # mysteriously, dot is faster than inner
+      self.input_data = _input_data.reshape([self.batch_size, self.input_size])
+      #self.scores = np.inner(self.weight_coefs, self.input_data).T + self.bias_offsets
+      self.scores = np.dot(self.weight_coefs, self.input_data.T).T + self.bias_offsets
+    else:
+      self.input_data = _input_data.reshape([self.batch_size, self.input_maps, self.input_size])
+      self.scores = np.einsum("kij,hij->hki", self.weight_coefs, self.input_data) + self.bias_offsets
+
     self.output = self.scores if self.transfer is None else self.transfer(self.scores)
 
     return self.output
@@ -270,18 +286,19 @@ class BackLayer (feedLayer):
 
   def backward(self, _output_data = []):
     """
-    Propagates errors through layer. Note:
+    Back-propagates errors through layer. Note:
 
     _output_data refers to `errors' _not_ known outputs.
     outputs the back-propagated data
     can be combined with backLayer.update() to update parameters.
     """
 
-    # Check batch-size 
     _output_data = np.asarray(_output_data)
+
+    # Check batch-size 
     _batch_size = len(_output_data)
-    if self.batch_size != _batch_size:
-      self.setBatchSize(_batch_size)
+    if self.batch_size != len(_output_data):
+      self.setBatchSize(_output_data)
       warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
@@ -290,12 +307,16 @@ class BackLayer (feedLayer):
     
     # Reshape data and calculate derivatives
 
-    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
-    if self.transder is None:
-      self.derivative = self.output_data 
+    if self.single_map:
+      self.output_data = _output_data.reshape([self.batch_size, self.size])
+      self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
+      #self.gradient = np.array([np.dot(self.derivative[i].reshape((self.size, 1)), 
+      #                                 self.input_data[i].reshape((1,self.input_size))) for i in range(self.batch_size)])
+      self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
     else:
-      self.derivative = self.output_data * self.transder(self.scores, self.output)
-    self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
+      self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
+      self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
+      self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
     # Now the gradient calculation and back-propagation
     self.back_data = np.dot(self.derivative, self.weight_coefs)
@@ -309,14 +330,11 @@ class BackLayer (feedLayer):
     """
 
     if _eta is not None: self.eta = _eta
-    if self.coef_shape is None: return None, None
-    if self.offs_shape is None: return None, None
     if self.derivative is None: return None, None
 
     # Check batch-size 
-    _batch_size = len(self.derivative)
-    if self.batch_size != _batch_size:
-      self.setBatchSize(_batch_size)
+    if self.batch_size != len(self.derivative):
+      self.setBatchSize(self.derivative)
       warnings.warn("BackLayer.update() batch size not matched by BackLayer.backward().")
 
     self.coef_delta = np.zeros(self.coef_shape, dtype = float)
@@ -326,8 +344,7 @@ class BackLayer (feedLayer):
       return self.coef_delta, self.offs_delta
 
     # Derivative first
-    if self.derivative is not None:
-      self.offs_delta = -self.eta * np.mean(self.derivative, axis = 0).reshape(self.offs_shape)
+    self.offs_delta = -self.eta * np.mean(self.derivative, axis = 0).reshape(self.offs_shape)
 
     # Now the gradient
     if self.gradient is not None:

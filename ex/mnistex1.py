@@ -38,7 +38,7 @@ for h in range(nArch):
     net[h].setInput([input_data.shape[1]])
   self = net[h]
 
-print("Training")
+print("Training net")
 C = np.empty(epochs*int(np.ceil(len(input_data)/float(bs))), dtype = float)
 k = 0
 output = None
@@ -71,7 +71,7 @@ for i in range(epochs):
       output = self.forward(test_input_data)
     else:
       output = self.forward(output)
-  output_ind = np.argmax(output, axis = 2).ravel()
+  output_ind = np.argmax(output, axis = -1).ravel()
   accuracy = 100. * len(np.nonzero(output_ind == test_output_data)[0])/float(len(output))
 
   print("".join((str(time()-t),"s: ", str(i+1), '/', str(epochs), " accuracy: ", str(accuracy), "%" ) ) )
