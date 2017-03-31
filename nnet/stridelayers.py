@@ -139,6 +139,13 @@ class PoolLayer(strideLayer):
   def_stride = [0, 1]
   pool_mode:           # user-specified mode
   mode = None          # mode actually used
+  stride = None        # flattened indices
+
+  def __init__(self, *args):
+    self.initialise(*args)
+    self.forward_call = {POOLMODE_RANGER:self.forward_ranger, POOLMODE_AXES:self.forward_axes}
+
+    # Back-propagation still uses ranger.strider so we do not polymorph self.backward
 
   def initialise(self, *args):
     strideLayer.initialise(self, *args)
@@ -150,11 +157,27 @@ class PoolLayer(strideLayer):
     elif self.pool_mode is None:
       self.pool_mode = POOLMODE_DEFAULT
 
-  def setBatchSize(self, _batch_size = 1): # this assigns
+  def setBatchSize(self, _batch_size = 1): # this formally assigns the mode and index
     """ 
     This class overloads this function and establishes actual pooling mode..
     """
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+
+    # Pooling mode defaults to ranger
+    
+    self.mode = POOLMODE_RANGER
+    if np.all(self.strides == self.kernel):
+      if self.pool_mode != POOLMODE_RANGER:
+        self.mode = POOLMODE_AXES
+
+    # Whatever mode, we need self.stride for the back-propagation
+    self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
+                          np.hstack((self.maps, self.kernel)), self.strides)
+
+  def forward(self, _input_data = []):
+    if self.batch_size != len(_input_data):
+      self.setBatchSize(_input_data)
+    self.forward_call[self.mode](_input_data)
 
 #-------------------------------------------------------------------------------
 class ConvLayer(strideLayer):
@@ -168,7 +191,7 @@ class ConvLayer(strideLayer):
   conv_mode = CONVMODE_FFT     : uses Fourier-accelerated convolution.
 
   """
-  def_stride = [0, 1]
+  def_stride = [1, 1]
   conv_mode:           # user-specified mode
   mode = None          # mode actually used
 
@@ -182,11 +205,27 @@ class ConvLayer(strideLayer):
     elif self.conv_mode is None:
       self.conv_mode = CONVMODE_DEFAULT
 
-  def setBatchSize(self, _batch_size = 1): # this assigns
+  def setBatchSize(self, _batch_size = 1): # this assigns convolution mode
     """ 
     This class overloads this function and establishes actual convolution mode..
     """
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
-     
+
+    # Pooling mode defaults to ranger
+    
+    self.mode = CONVMODE_FFT
+    if np.all(self.strides == self.kernel):
+      if self.conv_mode != CONVMODE_FFT:
+        self.mode = CONVMODE_RANGER
+
+    if self.mode is CONVMODE_RANGER
+      self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
+                            np.hstack((self.maps, self.kernel)),
+                            np.hstack(self.strides))
+
+  def forward(self, _input_data = []):
+    if self.batch_size != len(_input_data):
+      self.setBatchSize(_input_data)
+    self.forward_call[self.mode](_input_data)
 
 #-------------------------------------------------------------------------------
