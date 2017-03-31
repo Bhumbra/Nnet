@@ -11,6 +11,15 @@ convolution filter (i.e. rotated weight_coef).
 
 from nnet.baselayers import *
 
+CONVMODE_DEFAULT = 0
+CONVMODE_RANGER = 1
+CONVMODE_FFT = 2
+
+POOLMODE_DEFAULT = 0
+POOLMODE_RANGER = 1
+POOLMODE_AXES = 2
+
+#-------------------------------------------------------------------------------
 class strideLayer(BackLayer):
   """
   This is a BackLayer with explicit support for feature maps each containing arbitrary dimensions. No
@@ -31,8 +40,8 @@ class strideLayer(BackLayer):
 
   """
 
-  def_stride = 1 # default stride - which can be adjusted by other classes (0 matches coef_size)
-  single_map = None
+  def_stride = [1, 1] # default [neg_dim stride, pos_dim stride] - which can be adjusted by other classes (0 matches kernel)
+  single_map = None   # ignored by this function
   stride = None
   kernel = None  # size of kernel (i.e. coef_shape) - this term is less confusing for pooling
   filter = None
@@ -56,7 +65,9 @@ class strideLayer(BackLayer):
 
     if self.dims is None or self.input_dims is None: return
     if self.maps is None: self.maps = 1
-    if self.strides is None: self.strides = np.tile(self.def_strides, len(self.dims))
+    if self.strides is None: 
+      self.strides = np.tile(self.def_stride[0], len(self.dims))
+      self.strides[self.dims > 0] = self.def_stride[1]
 
     if len(self.dims) != len(self.strides):
       raise ValueError("Dimensionality in node dimension and stride specification incommensurate")
@@ -103,3 +114,79 @@ class strideLayer(BackLayer):
     self.coef_shape = np.hstack((self.maps, self.kernel))
     self.offs_shape = np.atleast_1d(self.maps, np.ones(self.size, dtype = int)) # one offset per map
 
+  def setBatchSize(self, _batch_size = 1):
+    """ 
+    This class overloads this function to block batch usage because this class shouldn't have any.
+    """
+    #self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+
+    raise TypeError("Batch operations not available directly from strideLayer instances")
+
+#-------------------------------------------------------------------------------
+
+class PoolLayer(strideLayer):
+  """
+  This is a strideLayer with explicit support for pooling, with Initialisation specification
+  identical to strideLayers except default stride specification is set to the window size for negative
+  indexed dimension specification. PoolLayer.setMode(pool_mode) sets:
+
+  pool_mode = POOLMODE_DEFAULT : uses default
+  pool_mode = POOLMODE_RANGER  : uses fancy indexing
+  pool_mode = POOLMODE_AXES    : uses re-axes pooling unless overlapping
+
+
+  """
+  def_stride = [0, 1]
+  pool_mode:           # user-specified mode
+  mode = None          # mode actually used
+
+  def initialise(self, *args):
+    strideLayer.initialise(self, *args)
+    self.setMode()
+
+  def setMode(self, _pool_mode = None):
+    if _pool_mode is not None: 
+      self.pool_mode = _pool_mode
+    elif self.pool_mode is None:
+      self.pool_mode = POOLMODE_DEFAULT
+
+  def setBatchSize(self, _batch_size = 1): # this assigns
+    """ 
+    This class overloads this function and establishes actual pooling mode..
+    """
+    self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+
+#-------------------------------------------------------------------------------
+class ConvLayer(strideLayer):
+  """
+  This is a strideLayer with explicit support for convolution, with Initialisation specification
+  identical to strideLayers except default stride specification is set 1. 
+  ConvLayer.setMode(conv_mode) sets:
+
+  conv_mode = CONVMODE_DEFAULT : uses default
+  conv_mode = CONVMODE_RANGER  : uses fancy indexing
+  conv_mode = CONVMODE_FFT     : uses Fourier-accelerated convolution.
+
+  """
+  def_stride = [0, 1]
+  conv_mode:           # user-specified mode
+  mode = None          # mode actually used
+
+  def initialise(self, *args):
+    strideLayer.initialise(self, *args)
+    self.setMode()
+
+  def setMode(self, _conv_mode = None):
+    if _conv_mode is not None: 
+      self.conv_mode = _conv_mode
+    elif self.conv_mode is None:
+      self.conv_mode = CONVMODE_DEFAULT
+
+  def setBatchSize(self, _batch_size = 1): # this assigns
+    """ 
+    This class overloads this function and establishes actual convolution mode..
+    """
+    self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+     
+
+#-------------------------------------------------------------------------------
