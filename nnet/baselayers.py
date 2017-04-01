@@ -75,7 +75,7 @@ class feedLayer (object):
       if type(arg) is str:
         self.setTransfer(arg)
 
-    # Initialise batch-size to 1
+    # Initialise batch-size to 0
     self.setBatchSize()
 
   def setDims(self, *args):
@@ -232,7 +232,7 @@ class feedLayer (object):
     if self.bias_offsets is None:
       self.bias_offsets = _bias_offsets * (np.random.uniform(size = self.offs_shape) - 0.5)
 
-  def setBatchSize(self, _batch_size = 1):
+  def setBatchSize(self, _batch_size = 0):
     """ 
     This not only specifies the batch-size in a data-absent manner but allows overloaded polymorphism in inheriting
     classes to adjust batch-size-sensitive arrays allocated in memoroy
@@ -264,10 +264,15 @@ class feedLayer (object):
       self.input_data = _input_data.reshape([self.batch_size, self.input_maps, self.input_size])
       self.scores = np.einsum("kij,hij->hki", self.weight_coefs, self.input_data) + self.bias_offsets
 
-    self.output = self.scores if self.transfer is None else self.transfer(self.scores)
+    return self.activate()
 
+  def activate(self, _scores = None):
+    if _scores is None:
+      _output = _scores if self.transfer is None else self.transfer(_scores)
+      return _output
+    self.output = _scores if self.transfer is None else self.transfer(_scores)
     return self.output
-
+    
 #-------------------------------------------------------------------------------
 class BackLayer (feedLayer):
   """

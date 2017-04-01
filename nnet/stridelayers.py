@@ -137,9 +137,12 @@ class PoolLayer(strideLayer):
 
   """
   def_stride = [0, 1]
-  pool_mode:           # user-specified mode
+  pool_mode = None     # user-specified mode
   mode = None          # mode actually used
   stride = None        # flattened indices
+  input_pool = None    # input for pooling
+  ran_pooled = None    # index for pooled range
+  arg_pooled = None    # argument output from pooling
 
   def __init__(self, *args):
     self.initialise(*args)
@@ -157,11 +160,12 @@ class PoolLayer(strideLayer):
     elif self.pool_mode is None:
       self.pool_mode = POOLMODE_DEFAULT
 
-  def setBatchSize(self, _batch_size = 1): # this formally assigns the mode and index
+  def setBatchSize(self, _batch_size = 0): # this formally assigns the mode and index
     """ 
-    This class overloads this function and establishes actual pooling mode..
+    This class overloads this function and establishes actual pooling mode.
     """
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+    if not(self.batch_size): return
 
     # Pooling mode defaults to ranger
     
@@ -174,15 +178,41 @@ class PoolLayer(strideLayer):
     self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
                           np.hstack((self.maps, self.kernel)), self.strides)
 
+    if self.mode == POOLMODE_RANGER:
+      self.ran_pooled = np.range(len(self.stride), dtype = int)
+    else:
+      stridesize = len(self.stride)/(self.batch_size, self.maps)
+      inner_ind = np.tile(np.arange(stridesize).reshape(1, 1, stridesize), (self.batch_size, self.maps, 1))
+      middl_ind = np.tile(np.arange(self.maps).reshape(1, self.maps, 1), (self.batch_size, 1, stridesize))
+      outer_ind = np.tile(np.arange(self.batch_size).reshape(self.batch_size, 1, 1), (1, self.maps, stridesize))
+      self.ran_pool = np.hstack( (outer_ind, middl_ind, inner_ind) )
+
   def forward(self, _input_data = []):
     if self.batch_size != len(_input_data):
       self.setBatchSize(_input_data)
-    self.forward_call[self.mode](_input_data)
+    if self.batch_size:
+      return self.forward_call[self.mode](_input_data)
+
+  def forward_ranger(self, _input_data = []):
+    self.input_data = _input_data
+    self.input_pool = np.take(self.input_data, self.stride)
+    self.arg_pooled = np.argmax(self.input_pool, axis = -1)
+    self.scores = np.reshape(self.input_pool[self.ran_pooled][self.arg_pooled],
+                             np.hstack((self.batch_size, self.maps, self.dims)))
+
+    return self.activate() 
+
+  def forward_axes(self, _input_data = []):
+    self.input_data = _input_data
+    self.input_pool = poolaxes(self.input_data. self.kernel)
+    self.arg_pooled = np.argmax(self.input_pool, axis = -1)
+    self.scores = self.input_pool[tuple(np.hstack(self.ran_pooled, self.arg_pooled))]    
+    return self.activate() 
 
 #-------------------------------------------------------------------------------
 class ConvLayer(strideLayer):
   """
-  This is a strideLayer with explicit support for convolution, with Initialisation specification
+  This is a strideLayer with explicit support for convolution, with initialisation specification
   identical to strideLayers except default stride specification is set 1. 
   ConvLayer.setMode(conv_mode) sets:
 
@@ -192,8 +222,9 @@ class ConvLayer(strideLayer):
 
   """
   def_stride = [1, 1]
-  conv_mode:           # user-specified mode
+  conv_mode = None     # user-specified mode
   mode = None          # mode actually used
+  input_conv = None    # input for convolution using tensor products
 
   def initialise(self, *args):
     strideLayer.initialise(self, *args)
@@ -207,9 +238,10 @@ class ConvLayer(strideLayer):
 
   def setBatchSize(self, _batch_size = 1): # this assigns convolution mode
     """ 
-    This class overloads this function and establishes actual convolution mode..
+    This class overloads this function and establishes actual convolution mode.
     """
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
+    if not(self.batch_size): return
 
     # Pooling mode defaults to ranger
     
@@ -218,7 +250,7 @@ class ConvLayer(strideLayer):
       if self.conv_mode != CONVMODE_FFT:
         self.mode = CONVMODE_RANGER
 
-    if self.mode is CONVMODE_RANGER
+    if self.mode is CONVMODE_RANGER:
       self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
                             np.hstack((self.maps, self.kernel)),
                             np.hstack(self.strides))
@@ -226,6 +258,7 @@ class ConvLayer(strideLayer):
   def forward(self, _input_data = []):
     if self.batch_size != len(_input_data):
       self.setBatchSize(_input_data)
-    self.forward_call[self.mode](_input_data)
+    if self.batch_size:
+      self.forward_call[self.mode](_input_data)
 
 #-------------------------------------------------------------------------------
