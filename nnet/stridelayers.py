@@ -3,8 +3,10 @@ A module for layer classes for strided operations with feature maps. These can b
 and unsupervsed learning. For classical convolutional networks, the classes ConvLayer and PoolLayer
 will be most useful here.
 
-Here I use `kernel' to refer to the weight coefficient or pooling size, and `filter' to be the actual 
-convolution filter (i.e. rotated weight_coef).
+`Filter' nomenclatures:
+  `window' - size of kernel within each feature map
+  `kernel' - the actual filter kernel (reversed weights_coef)
+
 """
 
 # Gary Bhumbra.
@@ -30,21 +32,20 @@ class strideLayer(BackLayer):
   Initialisation of this and inheriting classes with specification dimensions differs with that of 
   previous classes in two ways:
   
-  1. Negative indexing of node dimensions specifies kernel dimensions.
+  1. Negative indexing of node dimensions specifies window.
   2. A second array-like input is interpreted as a stride specification. Zero elements of this stride 
-     specification match the stride specification to kernel size in the corresponding axis. Negative 
-     (or zero) elements here can be used to specify the stride relative to the kernel only if the
-     kernel size was specified by negative indexing in the first array.
+     specification match the stride specification to window in the corresponding axis. Negative 
+     (or zero) elements here can be used to specify the stride relative to the window only if the
+     window was specified by negative indexing in the first array.
      
-  Note strideLayer.coef_shape concatenates maps with kernel size and strideLayer.single_map is ignored.
+  Note strideLayer.coef_shape concatenates maps with window and strideLayer.single_map is ignored.
 
   """
 
-  def_stride = [1, 1] # default [neg_dim stride, pos_dim stride] - which can be adjusted by other classes (0 matches kernel)
+  def_stride = [1, 1] # default [neg_dim stride, pos_dim stride] - which can be adjusted by other classes (0 matches window)
   single_map = None   # ignored by this function
   stride = None
-  kernel = None  # size of kernel (i.e. coef_shape) - this term is less confusing for pooling
-  filter = None
+  window = None  # size of window (i.e. coef_shape) - this term is less confusing for pooling
 
   def initialise(self, *args):
     BackLayer.initialise(self, *args)
@@ -74,44 +75,44 @@ class strideLayer(BackLayer):
 
     """
     4 combinations - and do in this order of increasing complexity!
-    positive dims, negative kernel, negative strides -> disallowed
-    positive dims, negative kernel, positive strides -> evaluate kernel
-    negative dims, positive kernel, negative strides -> evaluate strides then dims
-    negative dims, positive kernel, positive strides -> evaluate dims then swap
+    positive dims, negative window, negative strides -> disallowed
+    positive dims, negative window, positive strides -> evaluate window
+    negative dims, positive window, negative strides -> evaluate strides then dims
+    negative dims, positive window, positive strides -> evaluate dims then swap
 
     Dimension equation: 
-      kernel[i] = stride[i] * (1 - dims[i]) + input_size[i]
+      window[i] = stride[i] * (1 - dims[i]) + input_size[i]
                 or
-      dims[i]   = 1 + (input_size[i] - kernel[i])/stride[i]
+      dims[i]   = 1 + (input_size[i] - window[i])/stride[i]
                 or
-      stride[i] = (kernel[i] - input_size[i]) / (1 - dims[i])
+      stride[i] = (window[i] - input_size[i]) / (1 - dims[i])
     """
     
-    self.kernel = np.maximum(np.zeros(len(self.dims), dtype = int), -self.dims) 
+    self.window = np.maximum(np.zeros(len(self.dims), dtype = int), -self.dims) 
     
-    pos_kernel, pos_strides = self.kernel > 0,            self.strides > 0
-    neg_kernel, neg_strides = np.logical_not(pos_kernel), np.logical_not(pos_strides)
+    pos_window, pos_strides = self.window > 0,            self.strides > 0
+    neg_window, neg_strides = np.logical_not(pos_window), np.logical_not(pos_strides)
 
-    # positive dims, negative kernel, negative strides -> disallowed
-    cases = np.logical_and(neg_kernel, neg_strides)
+    # positive dims, negative window, negative strides -> disallowed
+    cases = np.logical_and(neg_window, neg_strides)
     if np.any(cases):
       raise ValueError("Negative indexing for strides requires negative indexing of dimension specification")
 
-    # positive dims, negative kernel, positive strides -> evaluate kernel
-    cases = np.logical_and(neg_kernel, pos_strides)
-    self.kernel[cases] = self.stride[cases] * (1 - self.dim[cases]) + self.input_size[cases]
+    # positive dims, negative window, positive strides -> evaluate window
+    cases = np.logical_and(neg_window, pos_strides)
+    self.window[cases] = self.stride[cases] * (1 - self.dim[cases]) + self.input_size[cases]
     
-    # negative dims, positive kernel, negative strides -> evaluate strides then dims
-    cases = np.logical_and(pos_kernel, neg_strides)
-    self.strides[cases] += self.kernel[cases]
-    self.dims[cases] = 1 + (self.input_size[cases] - self.kernel[cases]) / self.stride[cases]
+    # negative dims, positive window, negative strides -> evaluate strides then dims
+    cases = np.logical_and(pos_window, neg_strides)
+    self.strides[cases] += self.window[cases]
+    self.dims[cases] = 1 + (self.input_size[cases] - self.window[cases]) / self.stride[cases]
     
-    # negative dims, positive kernel, positive strides -> evaluate dims then swap
-    cases = np.logical_and(pos_kernel, pos_strides)
-    self.dims[cases] = 1 + (self.input_size[cases] - self.kernel[cases]) / self.stride[cases]
-    self.dims[cases], self.kernel[cases] = self.kernel[cases], self.strides[cases]
+    # negative dims, positive window, positive strides -> evaluate dims then swap
+    cases = np.logical_and(pos_window, pos_strides)
+    self.dims[cases] = 1 + (self.input_size[cases] - self.window[cases]) / self.stride[cases]
+    self.dims[cases], self.window[cases] = self.window[cases], self.strides[cases]
 
-    self.coef_shape = np.hstack((self.maps, self.kernel))
+    self.coef_shape = np.hstack((self.maps, self.window))
     self.offs_shape = np.atleast_1d(self.maps, np.ones(self.size, dtype = int)) # one offset per map
 
   def setBatchSize(self, _batch_size = 1):
@@ -170,13 +171,13 @@ class PoolLayer(strideLayer):
     # Pooling mode defaults to ranger
     
     self.mode = POOLMODE_RANGER
-    if np.all(self.strides == self.kernel):
+    if np.all(self.strides == self.window):
       if self.pool_mode != POOLMODE_RANGER:
         self.mode = POOLMODE_AXES
 
     # Whatever mode, we need self.stride for the back-propagation
     self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
-                          np.hstack((self.maps, self.kernel)), self.strides)
+                          np.hstack((self.maps, self.window)), self.strides)
 
     if self.mode == POOLMODE_RANGER:
       self.ran_pooled = np.range(len(self.stride), dtype = int)
@@ -204,10 +205,40 @@ class PoolLayer(strideLayer):
 
   def forward_axes(self, _input_data = []):
     self.input_data = _input_data
-    self.input_pool = poolaxes(self.input_data. self.kernel)
+    self.input_pool = poolaxes(self.input_data. self.window)
     self.arg_pooled = np.argmax(self.input_pool, axis = -1)
     self.scores = self.input_pool[tuple(np.hstack(self.ran_pooled, self.arg_pooled))]    
     return self.activate() 
+
+  def backward(self, _output_data = []):
+    """
+    Back-propagates errors through layer. Note there are no gradients since there are no weights to updates.
+    Outputs the back-propagated data.
+    """
+
+    _output_data = np.asarray(_output_data)
+
+    # Check batch-size 
+    _batch_size = len(_output_data)
+    if self.batch_size != len(_output_data):
+      self.setBatchSize(_output_data)
+      warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
+
+    # Test shape of output data and reshape according to expected input dimensionality
+    if np.prod(_output_data.shape[1:]) != self.Size:
+      raise ValueError("Output data dimensions incommensurate with specified archecture")
+    
+    # Reshape data and calculate derivatives
+
+    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
+    self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
+    self.back_data = np.zeros(np.hstack((self.batch_size, self.maps, self.input_data)), dtype = float)
+    self.back_data.put(self.arg_pooled, self.derivative)
+
+    return self.back_data
+
+  def update(self, *args): # Pool layers do not update
+    pass
 
 #-------------------------------------------------------------------------------
 class ConvLayer(strideLayer):
@@ -225,6 +256,7 @@ class ConvLayer(strideLayer):
   conv_mode = None     # user-specified mode
   mode = None          # mode actually used
   input_conv = None    # input for convolution using tensor products
+  kernel = None        # the convolution `filter' [reversed weight_coef]
 
   def initialise(self, *args):
     strideLayer.initialise(self, *args)
@@ -246,13 +278,13 @@ class ConvLayer(strideLayer):
     # Pooling mode defaults to ranger
     
     self.mode = CONVMODE_FFT
-    if np.all(self.strides == self.kernel):
+    if np.all(self.strides == self.window):
       if self.conv_mode != CONVMODE_FFT:
         self.mode = CONVMODE_RANGER
 
     if self.mode is CONVMODE_RANGER:
       self.stride = strider(np.hstack((self.batch_size, self.input_maps, self.dims)),
-                            np.hstack((self.maps, self.kernel)),
+                            np.hstack((self.maps, self.window)),
                             np.hstack(self.strides))
 
   def forward(self, _input_data = []):

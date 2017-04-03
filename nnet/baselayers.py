@@ -218,12 +218,12 @@ class feedLayer (object):
    
     if type(_weight_coefs) is np.ndarray:
       self.weight_coefs = _weight_coefs
-      if np.any(self.coef_shape != self.weight_coefs):
+      if np.any(self.coef_shape != self.weight_coefs.shape):
         raise ValueError("Coefficient array of unexpected dimensions.")
 
     if type(_bias_offsets) is np.ndarray:
       self.bias_offsets = _bias_offsets
-      if np.any(self.offs_shape != self.bias_offsets):
+      if np.any(self.offs_shape != self.bias_offsets.shape):
         raise ValueError("Offset array of unexpected dimensions.")
 
     if self.weight_coefs is None:
@@ -267,10 +267,10 @@ class feedLayer (object):
     return self.activate()
 
   def activate(self, _scores = None):
-    if _scores is None:
+    if _scores is not None:
       _output = _scores if self.transfer is None else self.transfer(_scores)
       return _output
-    self.output = _scores if self.transfer is None else self.transfer(_scores)
+    self.output = self.scores if self.transfer is None else self.transfer(self.scores)
     return self.output
     
 #-------------------------------------------------------------------------------
@@ -366,8 +366,7 @@ class BackLayer (feedLayer):
     if self.gradient is not None:
       self.coef_delta = -self.eta * np.mean(self.gradient, axis = 0).reshape(self.coef_shape)
 
-    self.weight_coefs += self.coef_delta
-    self.bias_offsets += self.offs_delta
+    self.setParams(self.weight_coefs + self.coef_delta, self.bias_offsets + self.offs_delta)
 
     return self.coef_delta, self.offs_delta
 

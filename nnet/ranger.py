@@ -346,24 +346,25 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
     - in1 and in2 are entirely commutative including for `valid' mode.
     - if either input is an integer array it is treated as dimension specification
       and the Fourier transform of the other input is outputted.
-    - if both inputs are integer arrays, they are treated as a dimension specifications
-      and the dimensions of the corresponding Fourier (input and output) dimensions
-      % are outputted.
+    - if both inputs are integer arrays, they are treated as dimension specifications
+      and the dimensions of the corresponding Fourier dimensions are outputted as a
+      tuple of shapes in the following order (In1.shape, In2.shape, Out.shape).
     - optional inputs In1 and In2 may be entered as the Fourier transforms if pre-
-      computed for performance - the size of the Fourier domain is be adjusted
+      computed for performance - the size of the Fourier domain is adjusted
       accordingly. If either of optional inputs In1 or In2 are integer array, they 
       specify the input dimensions of the Fourier domain; the output dimensions will be
       adjusted accordingly.
-    - _kwds allows specification of axes (e.g. axes = [0,1] to convolve, defaulting 
-      to all axes of input with fewer dimensions - note unconvolved dimensions
-      must be commensurate.
+    - _kwds allows specification of axes (e.g. axes = [0,1]) to convolve, defaulting 
+      to all axes of the input with fewer dimensions - note unconvolved dimensions
+      must be either commensurate singleton for one input for valid broadcasting.
 
-    Note that the `mode' is ignored unless both in1 and in2 are floating point arrays.
+    Note that `mode' is ignored unless both in1 and in2 are floating point arrays.
 
   """
 
   if mode is None: mode = 'full'
 
+  # Check input data types and shapes and homogenise dimensionality if required
   in1,   in2   = np.asarray(in1), np.asarray(in2)
   in1dt, in2dt = in1.dtype,       in2.dtype;
 
@@ -383,19 +384,22 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
 
   s1, s2 = np.maximum(sh1, sh2), np.minimum(sh1, sh2) 
 
+  # Default axes or confirm axes specification gives compatible dimensions in unconvolved axes
   kwds = dict(_kwds)
   if 'axes' not in kwds:
     ax = np.arange(mind) + difd 
-  else: # check commensurate dimensions of unconvolved dimensions
+  else:
     ax = np.unique(np.atleast_1d(kwds['axes']))
     notax = np.ones(maxd, dtype = bool)
     notax[ax] = False
-    if np.any(sh1[notax] != sh2[notax]):
+    sh1na, sh2na = sh1[notax], sh2[notax]
+    if np.any(np.logical_and(sh1na != sh2na, np.logical_and(sh1na !=1, sh2na !=1))):
       raise ValueError("Unconvolved dimensions incommensurate.")
 
   shape = s1[ax] + s2[ax] - 1
   fshape = [_next_regular(int(sz)) for sz in shape]
-  
+
+  # Check dimensions of Fourier inputs if entered
   Fshape, Sh1, Sh2 = None, None, None
   if In1 is not None: 
     In1 = np.asarray(In1)
@@ -411,10 +415,16 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
     if Sh1 is not None:
       if not Sh1.ndim == Sh2.ndim:
         raise ValueError("Fourier input dimensionality incommensurate")
-      if not np.all(Sh1 == Sh2):
-        raise ValueError("Fourier input dimensions incommensurate")
+      if not np.all(Sh1[ax] == Sh2[ax]):
+        raise ValueError("Fourier input dimensions incommensurate within domain axes")
+      notax = np.ones(maxd, dtype = bool)
+      notax[ax] = False
+      Sh1na, Sh2na = Sh1[notax], Sh2[notax]
+      if np.any(np.logical_and(Sh1na != Sh2na, np.logical_and(Sh1na !=1, Sh2na !=1))):
+        raise ValueError("Fourier input dimensions incommensurate outside domain axes")
     Fshape = Sh2[ax]
 
+  # Adjust Fourer input or output dimensions if required
   if Fshape is None:
     Fshape = np.copy(fshape)
     Fshape[-1] = Fshape[-1] // 2 + 1
@@ -424,12 +434,12 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
     if np.any(_fshape != fshape) and fshape[-1] != _fshape[-1] + 1:
       fshape = _fshape
 
+  # Output sizes or Fourier transforms according to input data types
   if in1dt is np.dtype('int64'):
     if in2dt is np.dtype('int64'): 
-      ishape, oshape = np.copy(s1), np.copy(s1)
-      ishape[ax] = fshape
-      oshape[ax] = Fshape
-      return ishape, oshape;
+      in1s, in2s, outs = np.copy(sh1), np.copy(sh2), np.copy(s1)
+      in1s[ax], in2s[ax], out[ax] = fshape, fshape, Fshape
+      return in1s, in2s, outs
     else:
       In2 = fftn(in2, fshape, axes = ax) if np.issubdtype(in2dt, np.complex) else rfftn(in2, fshape, axes = ax)
       return In2
@@ -437,24 +447,27 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
     In1 = fftn(in1, fshape, axes = ax) if np.issubdtype(in1dt, np.complex) else rfftn(in1, fshape, axes = ax)
     return In1
 
+  # Prepare slices for Fourier axes used for convolution
   fslice = [slice(None)] * len(s1)
   for i in range(len(ax)):
     fslice[ax[i]] = slice(None, shape[i])
   fslice = tuple(fslice)
 
+  # Apply convolution theorem
   if np.issubdtype(in1dt, np.complex) or np.issubdtype(in2dt, np.complex):
     if In1 is None: In1 = fftn(in1, fshape, axes = ax)
     if In2 is None: In2 = fftn(in2, fshape, axes = ax)
-    ret = ifftn(In1 * In2, fshape, axes = ax)[fslice].copy()
+    out = ifftn(In1 * In2, fshape, axes = ax)[fslice].copy()
   else:
     if In1 is None: In1 = rfftn(in1, fshape, axes = ax)
     if In2 is None: In2 = rfftn(in2, fshape, axes = ax)
-    ret = irfftn(In1 * In2, fshape, axes = ax)[fslice].copy()
+    out = irfftn(In1 * In2, fshape, axes = ax)[fslice].copy()
 
+  # Return array or subarray according to mode
   if mode == "full":
-      return ret
+      return out
 
-  censh = np.atleast_1d(ret.shape)
+  censh = np.atleast_1d(out.shape)
   if mode == "same":
     censh[ax] = s1[ax]
   elif mode == "valid":
@@ -463,7 +476,7 @@ def conv(in1, in2, mode = None, In1 = None, In2 = None, **_kwds):
       raise ValueError("Acceptable mode flags are 'valid',"
                        " 'same', or 'full'.")
 
-  return _centered(ret, censh)
+  return _centered(out, censh)
 
 #-------------------------------------------------------------------------------
 def poolaxes(X, _E): 
