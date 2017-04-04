@@ -11,17 +11,17 @@ import nnet.trans_func as trans_func
 from dtypes import *
 
 #-------------------------------------------------------------------------------
-class feedLayer (object):
+class forwardLayer (object):
   """
-  This is a convenience feedforward class for handling input, output, and archectural 
-  dimensionality, with handling of activation functions and derivatives - but without 
+  This is a foundation feedforward class for handling input, output, and archectural 
+  dimensionality, supporting activation functions and derivatives, but without 
   supervised or unsupersised learning functionality. It accommodates for multiple
-  channels to allow the outer dimensionality demanded from feature maps. 
+  channels to allow the outer dimensionality demanded from feature maps.
   
   It is camel-cased because it is not intended to be used natively but as a base class
   for an inheriting class. However it can be invoked:
   
-  self = feedLayer(*args)
+  self = forwardLayer(*args)
   
   where for args:
 
@@ -30,10 +30,14 @@ class feedLayer (object):
   #3 any string (e.g. 'sigm', 'tanh', 'none', 'relu' specifies the transfer function)
   #4 a layer class specifies the relative input layer
 
-  Neggative specifications in case #2 can be used for relative downsizing from preceding
+  Negative specifications in case #2 can be used for relative downsizing from preceding
   input layer.
  
-  Note that feedfoward instances do not `own' the input_data.
+  Note that feedfoward instances do not `own' the input_data. The input_data can be
+  fed to the class using the forwardLayer.feedforward(_input_data) method and the results 
+  of the activation transfer function are returned by forwardLayer.activate(). The two
+  methods are combined in the forwardLayer.forward(_input_data) method.
+
   """
   dims = None     # layer dimensions within each feature map
   maps = None     # number of feature maps
@@ -65,7 +69,7 @@ class feedLayer (object):
 
     # If specified set input specification, otherwise default it
     for arg in args:
-      if isinstance(arg, feedLayer):
+      if isinstance(arg, forwardLayer):
         self.setInput(arg)
 
     if self.input_dims is None: self.setInput()
@@ -125,7 +129,7 @@ class feedLayer (object):
     self.input_size = None
     self.input_Size = None
     for arg in args:
-      if isinstance(arg, feedLayer):
+      if isinstance(arg, forwardLayer):
         self.input_layer = arg
         self.input_dims = arg.dims
         self.input_maps = arg.maps
@@ -135,7 +139,12 @@ class feedLayer (object):
         else:
           raise ValueError("Unexpected number of array-like input arguments.")
       elif isint(arg):
-        self.input_maps = int(arg)
+        if self.input_maps is None:
+          self.input_maps = int(arg)
+        else:
+          raise ValueError("Unexpected number of integer input arguments.")
+      else:
+        raise ValueError("Unexpected input argument type.")
 
     # If present layers has no dimensions, return
     if self.dims is None: 
@@ -235,13 +244,24 @@ class feedLayer (object):
   def setBatchSize(self, _batch_size = 0):
     """ 
     This not only specifies the batch-size in a data-absent manner but allows overloaded polymorphism in inheriting
-    classes to adjust batch-size-sensitive arrays allocated in memoroy
+    classes to adjust batch-size-sensitive arrays and methods.
     """
     self.batch_size = int(_batch_size) if isint(_batch_size) else len(_batch_size)
 
   def forward(self, _input_data = []):
     """
-    Forward-propagates data through layer. Outputs results from transfer function.
+    Convenience function combining two lines of code:
+
+    self.feedforward(_input_data)
+    return self.activate()
+    """
+
+    self.feedforward(_input_data)
+    return self.activate()
+
+  def feedforward(self, _input_data = []):
+    """
+    Forward-propagates data through layer to evaluate scores: Z = (W * X.T).T + u
     """
 
     _input_data = np.asarray(_input_data)
@@ -264,9 +284,12 @@ class feedLayer (object):
       self.input_data = _input_data.reshape([self.batch_size, self.input_maps, self.input_size])
       self.scores = np.einsum("kij,hij->hki", self.weight_coefs, self.input_data) + self.bias_offsets
 
-    return self.activate()
+    return self.scores
 
   def activate(self, _scores = None):
+    """
+    Evaluates transfer function from scores: A = \sigma(Z)
+    """
     if _scores is not None:
       _output = _scores if self.transfer is None else self.transfer(_scores)
       return _output
@@ -274,19 +297,24 @@ class feedLayer (object):
     return self.output
     
 #-------------------------------------------------------------------------------
-class BackLayer (feedLayer):
+class FeedLayer (forwardLayer):
   """
   This is a generic feedforward + feedback class inheriting from feedlayer but
-  with the additional facility of backward(). It is suitable for use as either a
-  first or hidden fully-connected layer, but not output layer as it supports
-  neither unsupervised or supervised learning paradigms.
+  with the additional feedback and backpropagation functionality of backward(). 
+  It is suitable for use as either a first or hidden fully-connected layer, 
+  but not output layer as it supports neither unsupervised or supervised learning
+  rules. 
   
-  It is instantiated in the same way as feedLayer. 
+  It is instantiated in the same way as forwardLayer. 
 
-  This class also offers BackLayer.update(eta = 1) which updates the coefficient weights
+  This class also offers FeedLayer.update(eta = 1) which updates the coefficient weights
   and bias offsets according to stochastic gradient descent scaled by the batch size.
 
-  Note that BackLayer instances do not `own' the output_data.
+  Note that FeedLayer instances do not `own' the output_data. The output_data can be
+  fed to the class using the FeedLayer.feedback(_output_data) method and the results 
+  of the backpropagation are returned by FeedLayer.backpropagate(). The two
+  methods are combined in the FeedLayer.backward(_input_data) method.
+
   """
   output_data = None
   derivative = None # = d(cost)/d(scores)       = [d(cost)/d(output)]   * [d(output)/d(scores)]
@@ -297,25 +325,34 @@ class BackLayer (feedLayer):
   offs_delta = None # change to bias_offsets
 
   def initialise(self, *args):
-    feedLayer.initialise(self, *args)
+    forwardLayer.initialise(self, *args)
     self.update(1.) # default learning rate
 
   def backward(self, _output_data = []):
     """
-    Back-propagates errors through layer. Note:
+    Convenience function combining two lines of code:
 
-    _output_data refers to `errors' _not_ known outputs.
-    outputs the back-propagated data
-    can be combined with backLayer.update() to update parameters.
+    self.feedback(_output_data)
+    return self.backpropagate()
     """
+    self.feedback(_output_data)
+    return self.backpropagate()
 
+  def feedback(self, _output_data = []):
+    """
+    Feeds `errors' through layer to compute the derivate: D = E o \sigma^\prime(Z)
+    - also calculates gradients for weight-coefficient updates: G = (D * X).T
+    
+    Note that output_data refers to `errors' _not_ and does not compute costs.   
+    
+    """
     _output_data = np.asarray(_output_data)
 
     # Check batch-size 
     _batch_size = len(_output_data)
     if self.batch_size != len(_output_data):
       self.setBatchSize(_output_data)
-      warnings.warn("BackLayer.backward() batch size not matched by Backlayer.forward().")
+      warnings.warn("FeedLayer.backward() batch size not matched by Backlayer.forward().")
 
     # Test shape of output data and reshape according to expected input dimensionality
     if np.prod(_output_data.shape[1:]) != self.Size:
@@ -334,9 +371,19 @@ class BackLayer (feedLayer):
       self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
       self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
-    # Now the gradient calculation and back-propagation
-    self.back_data = np.dot(self.derivative, self.weight_coefs)
+    return self.derivative
 
+  def backpropagate(self):
+    """
+    Backpropagates derivatives to calculate back-propagated `errors': B = D * W
+    
+    Note that no backpropagation calculation is performed without a known input layer.
+    
+    """
+
+    # Now the gradient calculation and back-propagation
+    if self.input_layer is None: return self.back_data
+    self.back_data = np.dot(self.derivative, self.weight_coefs)
     return self.back_data
   
   def update(self, _eta = None):
@@ -351,7 +398,7 @@ class BackLayer (feedLayer):
     # Check batch-size 
     if self.batch_size != len(self.derivative):
       self.setBatchSize(self.derivative)
-      warnings.warn("BackLayer.update() batch size not matched by BackLayer.backward().")
+      warnings.warn("FeedLayer.update() batch size not matched by FeedLayer.backward().")
 
     self.coef_delta = np.zeros(self.coef_shape, dtype = float)
     self.offs_delta = np.zeros(self.offs_shape, dtype = float)

@@ -7,11 +7,11 @@ A module with classes for supervised learning.
 from nnet.baselayers import *
 import nnet.cost_func as cost_func
 
-class CostLayer (BackLayer):
+class CostLayer (FeedLayer):
   """
-  This is a BackLayer with a cost function support for cost-based learning
+  This is a FeedLayer with a cost function support for cost-based learning
   rules for supervised learning. It is therefore suitable for as an output
-  layer. Note that CostLayer.backward(_output_data) directly compares
+  layer. Note that CostLayer.feedback(_output_data) directly compares
   activation outputs to _output_data.
   """
   cost_data = None
@@ -20,7 +20,7 @@ class CostLayer (BackLayer):
   costder = None  # cost derivative
 
   def initialise(self, *args):
-    BackLayer.initialise(self, *args)
+    FeedLayer.initialise(self, *args)
     self.setCost()
 
   def setCost(self, *args):
@@ -42,7 +42,7 @@ class CostLayer (BackLayer):
     else:
       raise ValueError("Unexpected setCost(inputs arguments) specification.")
 
-  def backward(self, _output_data = []):
+  def feedback(self, _output_data = []):
     """
     _output_data refers to outputs to compare.
     outputs the back-propagated data
@@ -74,8 +74,6 @@ class CostLayer (BackLayer):
       self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
       self.gradient = np.einsum('ijk,ijl->ijkl', self.derivative, self.input_data)
 
-    # Now the gradient calculation and back-propagation
-    self.back_data = np.dot(self.derivative, self.weight_coefs)
+    return self.derivative
 
-    return self.back_data
 

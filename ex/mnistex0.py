@@ -20,11 +20,10 @@ TestData = test_data.swapaxes(0, 1)
 test_input_data = np.hstack(TestData[0]).T
 test_output_data = np.hstack(TestData[1]).T
 
-print("Constructing net")
 self = supvlayers.CostLayer([output_data.shape[1]], 'sigm')
 self.setInput([input_data.shape[1]])
 
-print("Training net")
+print("Training layer")
 C = np.empty(epochs*int(np.ceil(len(input_data)/float(bs))), dtype = float)
 k = 0
 for i in range(epochs):

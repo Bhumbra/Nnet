@@ -29,7 +29,7 @@ net = [[]] * nArch
 
 for h in range(nArch):
   if h < nArch - 1:
-    net[h] = baselayers.BackLayer(Arch[h], transfunc)
+    net[h] = baselayers.FeedLayer(Arch[h], transfunc)
   else:
     net[h] = supvlayers.CostLayer(Arch[h], transfunc)
   if h:
@@ -38,7 +38,7 @@ for h in range(nArch):
     net[h].setInput([input_data.shape[1]])
   self = net[h]
 
-print("Training net")
+print("Training stack")
 C = np.empty(epochs*int(np.ceil(len(input_data)/float(bs))), dtype = float)
 k = 0
 output = None
