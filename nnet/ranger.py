@@ -138,6 +138,10 @@ def subarray(X, _I = [], _J = [], _D = None):
 
   # Use slices for all non-trivial solutions
 
+  I = np.hstack( (np.zeros(N-len(I), dtype = int), I) ) 
+  J = np.hstack( (X.shape[:(N-len(J))], J) )
+  D = np.hstack( (np.ones(N-len(D), dtype = int), D) ) 
+
   return X[slices(I, J, D)]
 
 #-------------------------------------------------------------------------------
@@ -163,10 +167,11 @@ def reverse(X, _ax = None):
     if N == 2: return X[:, ::-1]
     if N == 3: return X[:, ::-1, ::-1]
 
-  # Otherwise resort to slices (np.flip would require a for loop)
+  # Otherwise resort to slices 
 
   s = [slice(None)] * N
-  s[ax] = slice(None, None, -1)
+  for _ax in ax:
+    s[_ax] = slice(None, None, -1)
   return X[s]
 
 #-------------------------------------------------------------------------------
@@ -175,10 +180,17 @@ def subsample(X, _d):
   Returns sub-sampled values of X according to the interval specification d. 
   '''
   d = np.atleast_1d(_d)
-  s = np.shape(X)
   N = np.ndim(X)
+  n = len(d)
 
-  # Deal with trivial low dimension cases first
+  # Deal with no subsampling 
+
+  if not(n) or np.all(d == 1): 
+    return X
+  elif n > N: 
+    raise ValueError("Subsampling specification exceeds input dimensionality.")
+
+  # Deal with trivial low dimension cases
 
   if N == len(d):
     if N == 1: return X[::d[0]]
@@ -190,18 +202,14 @@ def subsample(X, _d):
   if N == n + 1:
     if N == 2: return X[:, ::d[0]]
     if N == 3: return X[:, ::d[1], ::d[1]]
-
-  # Deal with other oher cases - note there is no need to pre-append d
-  Y = np.rollaxis(X, N-n)
-
-  for i in range(n):
-    Y = Y[::d[i]]
-    Y = np.rollaxis(Y, 1)
-
-  return Y
+  
+  # Deal with other cases - note there is no need to pre-append d
+  s = [slice(None)] * N
+  s[-n:] = [slice(None, None, d_) for d_ in d]
+  return X[s]
 
 #-------------------------------------------------------------------------------
-def intrapad(X, _d, x = 0.): 
+def intrapad(X, _d, x = 0.):  # this is trickier
   """
   Interleaves values x (default 0.) within array X according axis specification d.
   """

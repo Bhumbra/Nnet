@@ -7,8 +7,9 @@ from time import time
 epochs = 3
 bs = 10
 eta = 0.1
-Arch = [[-5, -5], (-2, -2), 10] # 3 layer network 
-maps = 3
+Arch = [[-5, -5], (-2, -2), 100, 10] # 4 layer network 
+maps = 20
+dv = 1000
 transfunc = 'sigm'
 
 print("Loading MNIST data...")
@@ -33,6 +34,8 @@ for h in range(nArch):
     Stack[h] = ConvLayer(maps, arch)
   elif type(arch) is tuple:
     Stack[h] = PoolLayer(maps, arch, transfunc)
+  elif h < nArch - 1:
+    Stack[h] = FeedLayer(arch, transfunc)
   else:
     Stack[h] = CostLayer(arch, transfunc)
   if h:
@@ -40,7 +43,7 @@ for h in range(nArch):
   else:
     Stack[h].setInput((28, 28))
 
-print("Training Stack")
+print("Training stack")
 C = np.empty(epochs*int(np.ceil(len(input_data)/float(bs))), dtype = float)
 k = 0
 output = None
@@ -50,6 +53,8 @@ for i in range(epochs):
   start, end = 0, bs
   done = end >= len(input_data)
   while not(done):
+    if not(np.mod(start, dv)):
+      print("".join(("   ", str(time()-t),"s: ", str(start), "/" + str(len(input_data)) ) ))
     for h in range(nArch):
       self = Stack[h]
       if not(h):

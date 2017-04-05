@@ -63,7 +63,7 @@ class baseLayer (object):
   coef_shape = None     # Weighting coefficient dimensions
   offs_shape = None     # Bias offsets dimensions
   batch_size = None    # len(input_data)
-  single_map = None    # flag to denote unitary maps from previous and present layer
+  single_map = None    # flag to denote unitary map in present layer
   input_data = None    # X
   weight_coefs = None  # W
   bias_offsets = None  # u
@@ -118,9 +118,6 @@ class baseLayer (object):
       if self.maps is None:
         self.maps = 1
 
-    self.size = np.prod(self.dims)
-    self.Size = self.maps * self.size
-    
   def setInput(self, *args):
     """
     This sets the input dimensionality or input connecting class - not the data itself.
@@ -177,7 +174,7 @@ class baseLayer (object):
     self.input_Size = self.input_maps * self.input_size 
 
     # Occam's razer should apply if input and current layer have single feature maps
-    self.single_map = self.maps == 1 and self.input_maps == 1
+    self.single_map = self.maps == 1
 
     # Initialise parameters
     self._setParamDims()
@@ -228,8 +225,11 @@ class baseLayer (object):
     elif np.any(neg_dims):
       raise ValueError("Relative dimension specfication incommensurate with previous layer")
 
+    self.size = np.prod(self.dims)
+    self.Size = self.maps * self.size
+    
     if self.single_map:
-      self.coef_shape = np.atleast_1d([self.size, self.input_size])
+      self.coef_shape = np.atleast_1d([self.size, self.input_Size])
       self.offs_shape = np.atleast_1d([1, self.size])
     else:
       self.coef_shape = np.atleast_1d([self.maps, self.size, self.input_size])
@@ -291,7 +291,7 @@ class baseLayer (object):
     # Forward operaion
 
     if self.single_map: # mysteriously, dot is faster than inner
-      self.input_data = _input_data.reshape([self.batch_size, self.input_size])
+      self.input_data = _input_data.reshape([self.batch_size, self.input_Size])
       #self.scores = np.inner(self.weight_coefs, self.input_data).T + self.bias_offsets
       self.scores = np.dot(self.weight_coefs, self.input_data.T).T + self.bias_offsets
     else:
@@ -399,6 +399,8 @@ class FeedLayer (baseLayer):
     # Now the gradient calculation and back-propagation
     if self.input_layer is None: return self.back_data
     self.back_data = np.dot(self.derivative, self.weight_coefs)
+    if self.single_map and self.input_maps == 1: return self.back_data # simplicity propagated
+    self.back_data = self.back_data.reshape(np.hstack([self.batch_size, self.input_maps, self.input_dims]))
     return self.back_data
   
   def update(self, _eta = None):
@@ -422,7 +424,11 @@ class FeedLayer (baseLayer):
       return self.coef_delta, self.offs_delta
 
     # Derivative first
-    self.offs_delta = -self.eta * np.mean(self.derivative, axis = 0).reshape(self.offs_shape)
+   
+    if np.prod(self.offs_shape) == self.maps:
+      self.offs_delta = -self.eta * np.sum(np.mean(self.derivative, axis = 0).reshape((self.maps, -1)), axis = 1).reshape(self.offs_shape)
+    else:
+      self.offs_delta = -self.eta * np.mean(self.derivative, axis = 0).reshape(self.offs_shape)
 
     # Now the gradient
     if self.gradient is not None:
