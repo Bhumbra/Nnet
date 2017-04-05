@@ -1,6 +1,15 @@
 """
 Class module for base layers that provide a foundation framework for both supervised
-and unsupervised nodal networks.
+and unsupervised nodal networks. 
+
+OOP notation convention:
+
+lowerCamelCase: base classes intended to inherited rather than instantiated.
+UpperCamelCase: classes intended for instantiation.
+self.lowerCamelCase: public class methods.
+self._lowerCamelCase: protected class methods.
+self.lowercase or self.snake_case: class properties.
+_snake_case: nontrivial local variables that lose scope outside method.
 """
 
 # Gary Bhumbra
@@ -11,17 +20,17 @@ import nnet.trans_func as trans_func
 from dtypes import *
 
 #-------------------------------------------------------------------------------
-class forwardLayer (object):
+class baseLayer (object):
   """
   This is a foundation feedforward class for handling input, output, and archectural 
   dimensionality, supporting activation functions and derivatives, but without 
-  supervised or unsupersised learning functionality. It accommodates for multiple
-  channels to allow the outer dimensionality demanded from feature maps.
+  intrinsic supervised or unsupersised learning functionality. It accommodates for 
+  multiple channels to allow the outer dimensionality demanded from feature maps.
   
-  It is camel-cased because it is not intended to be used natively but as a base class
-  for an inheriting class. However it can be invoked:
+  It is lower camel-cased because it is not intended to be used natively but as a base 
+  class for an inheriting class. However it can be invoked:
   
-  self = forwardLayer(*args)
+  self = baseLayer(*args)
   
   where for args:
 
@@ -34,9 +43,9 @@ class forwardLayer (object):
   input layer.
  
   Note that feedfoward instances do not `own' the input_data. The input_data can be
-  fed to the class using the forwardLayer.feedforward(_input_data) method and the results 
-  of the activation transfer function are returned by forwardLayer.activate(). The two
-  methods are combined in the forwardLayer.forward(_input_data) method.
+  fed to the class using the baseLayer.feedforward(_input_data) method and the results 
+  of the activation transfer function are returned by baseLayer.activate(). The two
+  methods are combined in the baseLayer.forward(_input_data) method.
 
   """
   dims = None     # layer dimensions within each feature map
@@ -69,7 +78,7 @@ class forwardLayer (object):
 
     # If specified set input specification, otherwise default it
     for arg in args:
-      if isinstance(arg, forwardLayer):
+      if isinstance(arg, baseLayer):
         self.setInput(arg)
 
     if self.input_dims is None: self.setInput()
@@ -129,7 +138,7 @@ class forwardLayer (object):
     self.input_size = None
     self.input_Size = None
     for arg in args:
-      if isinstance(arg, forwardLayer):
+      if isinstance(arg, baseLayer):
         self.input_layer = arg
         self.input_dims = arg.dims
         self.input_maps = arg.maps
@@ -146,26 +155,31 @@ class forwardLayer (object):
       else:
         raise ValueError("Unexpected input argument type.")
 
-    # If present layers has no dimensions, return
-    if self.dims is None: 
-      if self.input_maps is None: self.input_maps = 1
-      if self.input_dims is not None: 
-        self.input_size = np.prod(self.input_dims)
-        self.input_Size = self.input_maps * self.input.size
+    # Swap input_dims and input_maps to correspond to convention of current dims and maps
+    if self.input_dims is None:
+      if self.input_maps is not None:
+        self.input_dims = np.atleast_1d(self.input_maps)
+        self.input_maps = 1
+    elif self.input_maps is None:
+      self.input_maps = 1
+
+    # Return if insufficient information provided
+    if self.dims is None: # If present layer has no dimensions, return
       return
+    elif self.input_dims is None: # If input dims not given and relatively sized, return
+      if np.min(self.dims) < 1: return
 
     # If no inputs has been specified, default dimensions and maps
-    
     if self.input_dims is None: self.input_dims = self.dims
     if self.input_maps is None: self.input_maps = self.maps
 
     self.input_size = np.prod(self.input_dims)
     self.input_Size = self.input_maps * self.input_size 
 
+    # Occam's razer should apply if input and current layer have single feature maps
     self.single_map = self.maps == 1 and self.input_maps == 1
 
     # Initialise parameters
-
     self._setParamDims()
     self.setParams()
 
@@ -204,11 +218,11 @@ class forwardLayer (object):
     if self.dims is None or self.input_dims is None: return
     if self.maps is None: self.maps = 1
 
-    neg_dims = self.dims < 0
+    neg_dims = self.dims < 1
 
     if len(self.dims) == len(self.input_dims):
-      if np.any(self.input_dims < 0):
-        warnings.warn("Negative dimension relative specification ambiguously defined.")
+      if np.any(self.input_dims < 1):
+        warnings.warn("Relative dimension specification ambiguous in relation to input specification.")
       else:
         self.dims[neg_dims] += self.input_dims[neg_dims]
     elif np.any(neg_dims):
@@ -297,7 +311,7 @@ class forwardLayer (object):
     return self.output
     
 #-------------------------------------------------------------------------------
-class FeedLayer (forwardLayer):
+class FeedLayer (baseLayer):
   """
   This is a generic feedforward + feedback class inheriting from feedlayer but
   with the additional feedback and backpropagation functionality of backward(). 
@@ -305,10 +319,11 @@ class FeedLayer (forwardLayer):
   but not output layer as it supports neither unsupervised or supervised learning
   rules. 
   
-  It is instantiated in the same way as forwardLayer. 
+  It is instantiated in the same way as baseLayer: see help(baseLayer). 
 
-  This class also offers FeedLayer.update(eta = 1) which updates the coefficient weights
-  and bias offsets according to stochastic gradient descent scaled by the batch size.
+  This class also offers FeedLayer.update(_eta = 1) which updates the coefficient 
+  weights and bias offsets according to stochastic gradient descent scaled by the 
+  batch size.
 
   Note that FeedLayer instances do not `own' the output_data. The output_data can be
   fed to the class using the FeedLayer.feedback(_output_data) method and the results 
@@ -325,7 +340,7 @@ class FeedLayer (forwardLayer):
   offs_delta = None # change to bias_offsets
 
   def initialise(self, *args):
-    forwardLayer.initialise(self, *args)
+    baseLayer.initialise(self, *args)
     self.update(1.) # default learning rate
 
   def backward(self, _output_data = []):

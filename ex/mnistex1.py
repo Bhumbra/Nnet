@@ -25,18 +25,18 @@ test_output_data = np.hstack(TestData[1]).T
 
 print("...loaded.")
 nArch = len(Arch)
-net = [[]] * nArch
+Stack = [[]] * nArch
 
 for h in range(nArch):
   if h < nArch - 1:
-    net[h] = baselayers.FeedLayer(Arch[h], transfunc)
+    Stack[h] = baselayers.FeedLayer(Arch[h], transfunc)
   else:
-    net[h] = supvlayers.CostLayer(Arch[h], transfunc)
+    Stack[h] = supvlayers.CostLayer(Arch[h], transfunc)
   if h:
-    net[h].setInput(net[h-1])
+    Stack[h].setInput(Stack[h-1])
   else:
-    net[h].setInput([input_data.shape[1]])
-  self = net[h]
+    Stack[h].setInput([input_data.shape[1]])
+  self = Stack[h]
 
 print("Training stack")
 C = np.empty(epochs*int(np.ceil(len(input_data)/float(bs))), dtype = float)
@@ -49,24 +49,24 @@ for i in range(epochs):
   done = end >= len(input_data)
   while not(done):
     for h in range(nArch):
-      self = net[h]
+      self = Stack[h]
       if not(h):
         output = self.forward(input_data[start:end])
       else:
         output = self.forward(output)
     for h in range(nArch-1, -1, -1):
-      self = net[h]
+      self = Stack[h]
       if h == nArch - 1:
         back  = self.backward(output_data[start:end])
       else:
         back  = self.backward(back)
       self.update(eta)
-    C[k] = net[-1].cost_data
+    C[k] = Stack[-1].cost_data
     start, end = end, end+bs
     done = end >= len(input_data)
     k += 1
   for h in range(nArch):
-    self = net[h]
+    self = Stack[h]
     if not(h):
       output = self.forward(test_input_data)
     else:

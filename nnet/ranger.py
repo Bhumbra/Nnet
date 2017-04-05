@@ -9,11 +9,28 @@ from scipy.fftpack import (fftn, ifftn)
 from numpy.lib.stride_tricks import as_strided
 from scipy.signal.signaltools import _centered
 
+
+#-------------------------------------------------------------------------------
+# Deal with multiple versions of NumPy and SciPy in various states of obsolences
+#-------------------------------------------------------------------------------
+# FFTPACK.next_regular
 try:
   from scipy.signal.signaltools import _next_regular
 except ImportError:
   from scipy.fftpack.helper import next_fast_len as _next_regular
+#-------------------------------------------------------------------------------
+# np.flip
+def NPFLIP(X, a):
+  Xslice = [slice(None)] * X.ndim
+  Xslice[a] = slice(None, None, -1)
+  return X[Xslice]
 
+try:
+  npflip = np.flip
+except AttributeError:
+  npflip = NPFLIP
+
+#-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 def slices(_I = None, _J = None, _D = None, N = None):
   """
@@ -146,14 +163,11 @@ def reverse(X, _ax = None):
     if N == 2: return X[:, ::-1]
     if N == 3: return X[:, ::-1, ::-1]
 
-  # Otherwise definitive loop required
+  # Otherwise resort to slices (np.flip would require a for loop)
 
-  Y = None
-  for a in ax:
-    Y = np.flip(X, a) if Y is None else np.flip(Y, a)
-
-  return Y
-
+  s = [slice(None)] * N
+  s[ax] = slice(None, None, -1)
+  return X[s]
 
 #-------------------------------------------------------------------------------
 def subsample(X, _d):
