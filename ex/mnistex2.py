@@ -11,6 +11,8 @@ Arch = [[-5, -5], (-2, -2), 100, 10] # 4 layer network
 maps = 20
 dv = 1000
 transfunc = 'sigm'
+convmode = 0 # 0 default, 1 ranger, 2 fft
+poolmode = 0 # 0 default, 1 ranger, 2 axes
 
 print("Loading MNIST data...")
 data = np.load('data/mnistpkl.npz', encoding = 'latin1')
@@ -32,8 +34,10 @@ for h in range(nArch):
   arch = Arch[h]
   if type(arch) is list:
     Stack[h] = ConvLayer(maps, arch)
+    Stack[h].setMode(convmode)
   elif type(arch) is tuple:
     Stack[h] = PoolLayer(maps, arch, transfunc)
+    Stack[h].setMode(poolmode)
   elif h < nArch - 1:
     Stack[h] = FeedLayer(arch, transfunc)
   else:
@@ -55,19 +59,24 @@ for i in range(epochs):
   while not(done):
     if not(np.mod(start, dv)):
       print("".join(("   ", str(time()-t),"s: ", str(start), "/" + str(len(input_data)) ) ))
+    #print("foo")
     for h in range(nArch):
+      #print(h)
       self = Stack[h]
       if not(h):
         output = self.forward(input_data[start:end])
       else:
         output = self.forward(output)
+    #print("bar")
     for h in range(nArch-1, -1, -1):
+      #print(h)
       self = Stack[h]
       if h == nArch - 1:
         back  = self.backward(output_data[start:end])
       else:
         back  = self.backward(back)
       self.update(eta)
+    #print("baz")
     C[k] = Stack[-1].cost_data
     start, end = end, end+bs
     done = end >= len(input_data)

@@ -47,6 +47,7 @@ class strideLayer(FeedLayer):
   single_map = None   # ignored by this function
   stride = None
   window = None  # size of window (i.e. coef_shape) - this term is less confusing for pooling
+  Window = None  # np.prod(window)
 
   def setDims(self, *args):
     FeedLayer.setDims(self, *args)
@@ -90,7 +91,6 @@ class strideLayer(FeedLayer):
     pos_window, pos_stride = self.window > 0,            self.stride > 0
     neg_window, neg_stride = np.logical_not(pos_window), np.logical_not(pos_stride)
 
-    print( (self.dims, self.input_dims, self.window, self.stride, pos_window, pos_stride) )
     # positive dims, negative window, negative strides -> disallowed
     cases = np.logical_and(neg_window, neg_stride)
     if np.any(cases):
@@ -109,7 +109,8 @@ class strideLayer(FeedLayer):
     #cases = np.logical_and(pos_window, pos_stride)
     cases = pos_window
     self.dims[cases] = 1 + (self.input_dims[cases] - self.window[cases]) / self.stride[cases]
-
+   
+    self.Window = np.prod(self.window)
     self.size = np.prod(self.dims)
     self.Size = self.maps * self.size
 
@@ -183,13 +184,10 @@ class PoolLayer(strideLayer):
 
     strides_num = self.strides.shape[2]
 
-    if self.mode == POOLMODE_RANGER:
-      self.ind_pooled = np.range(strides_num, dtype = int)
-    else:
-      inner_ind = np.tile(np.arange(strides_num).reshape(1, 1, strides_num), (self.batch_size, self.maps, 1))
-      middl_ind = np.tile(np.arange(self.maps).reshape(1, self.maps, 1), (self.batch_size, 1, strides_num))
-      outer_ind = np.tile(np.arange(self.batch_size).reshape(self.batch_size, 1, 1), (1, self.maps, strides_num))
-      self.ind_pooled =  [outer_ind, middl_ind, inner_ind, None]
+    inner_ind = np.tile(np.arange(strides_num).reshape(1, 1, strides_num), (self.batch_size, self.maps, 1))
+    middl_ind = np.tile(np.arange(self.maps).reshape(1, self.maps, 1), (self.batch_size, 1, strides_num))
+    outer_ind = np.tile(np.arange(self.batch_size).reshape(self.batch_size, 1, 1), (1, self.maps, strides_num))
+    self.ind_pooled =  [outer_ind, middl_ind, inner_ind, None]
 
   def feedforward(self, _input_data = []):
     if self.batch_size != len(_input_data):
@@ -201,10 +199,10 @@ class PoolLayer(strideLayer):
     self.input_data = _input_data
     self.input_pool = np.take(self.input_data, self.strides)
     self.arg_pooled = np.argmax(self.input_pool, axis = -1)
-    self.scores = np.reshape(self.input_pool[self.ran_pooled][self.arg_pooled],
+    self.ind_pooled[-1] = self.arg_pooled
+    self.scores = np.reshape(self.input_pool[tuple(self.ind_pooled)],
                              np.hstack((self.batch_size, self.maps, self.dims)))
-
-    return self.activate() 
+    return self.scores
 
   def feedforward_axes(self, _input_data = []):
     self.input_data = _input_data
@@ -213,8 +211,7 @@ class PoolLayer(strideLayer):
     self.ind_pooled[-1] = self.arg_pooled
     self.scores = np.reshape(self.input_pool[tuple(self.ind_pooled)],
                              np.hstack((self.batch_size, self.maps, self.dims)))
-
-    return self.activate() 
+    return self.scores
 
   def feedback(self, _output_data = []):
     """
@@ -299,15 +296,17 @@ class ConvLayer(strideLayer):
 
     # Pooling mode defaults to ranger
     
-    self.mode = CONVMODE_FFT
-    if np.all(self.stride == self.window):
-      if self.conv_mode != CONVMODE_FFT:
+    self.mode = self.conv_mode
+    if self.mode == CONVMODE_DEFAULT: 
+      if np.all(self.stride == self.window):
         self.mode = CONVMODE_RANGER
+      else:
+        self.mode = CONVMODE_FFT
 
-    if self.mode is CONVMODE_RANGER:
+    if self.mode == CONVMODE_RANGER:
       self.strides = strider(np.hstack((self.batch_size, self.input_maps, self.input_dims)),
-                             np.hstack((self.maps, self.window)),
-                             np.hstack((self.maps, self.stride)))
+                             np.hstack((self.window)), 
+                             np.hstack((self.stride)))
     else:
       self.conv_axes = np.arange(2, 2+len(self.dims))
       self.conv_grad_ind0 = self.dims + self.stride - 1
@@ -322,9 +321,10 @@ class ConvLayer(strideLayer):
   def feedforward_ranger(self, _input_data = []):
     self.input_data = _input_data
     self.input_conv = np.take(self.input_data, self.strides)
-    self.scores = np.einsum('hijk,ik->hij', self.input_conv,
-                  self.weight_coefs.reshape([1, self.maps, self.size])).reshape(
-                  np.hstack([self.batch_size, self.maps, self.dims])) + self.bias_offsets.reshape([1, self.maps, 1])
+    self.scores = np.einsum('hijk,ik->hij', self.input_conv, 
+                  self.weight_coefs.reshape((self.maps, self.Window))).reshape(
+                  np.hstack([self.batch_size, self.maps, self.dims])) + \
+                  self.bias_offsets.reshape(np.hstack([1, self.bias_offsets.shape]))
 
     return self.scores
 
@@ -360,9 +360,9 @@ class ConvLayer(strideLayer):
     self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
     self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
 
-    self.gradient = np.einsum('hijk,hij->hij', np.swapaxes(self.input_conv, 2, 3),
-                              self.derivative.reshape(self.batch_size, self.maps, self.size)).reshape(
-                              np.hstack([self.batch_size, self.maps, self.coef_shape]))
+    self.gradient = np.einsum('hijk,hik->hij', np.swapaxes(self.input_conv, 2, 3),
+                              self.derivative.reshape((self.batch_size, self.maps, self.size))).reshape(
+                              np.hstack([self.batch_size, self.coef_shape]))
     return self.derivative
 
   def backpropagate_ranger(self):
@@ -380,7 +380,6 @@ class ConvLayer(strideLayer):
   def feedback_fft(self, _output_data = []):
     self.output_data = _output_data.reshape(np.hstack([self.batch_size, self.maps, self.dims]))
     self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
-
 
     self.deriv_conv = reverse(intrapad(self.derivative, self.stride), self.conv_axes)
     self.gradient = subarray(conv(self.deriv_conv, self.input_data, axes = self.conv_axes), 

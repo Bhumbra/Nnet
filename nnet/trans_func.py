@@ -8,10 +8,13 @@ import numpy as np
 
 #-------------------------------------------------------------------------------
 def sigval(x, expmin = -69.):
+  """
   y = np.zeros(x.shape, dtype = float)
   ok = x > expmin
   y[ok] = 1./(1.+np.exp(-x[ok]))
   return y
+  """
+  return 0.5 * np.tanh(0.5*x) + 0.5
 
 #-------------------------------------------------------------------------------
 def sigder(x, _sx = None):
