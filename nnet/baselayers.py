@@ -378,9 +378,8 @@ class FeedLayer (baseLayer):
     if self.single_map:
       self.output_data = _output_data.reshape([self.batch_size, self.size])
       self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
-      #self.gradient = np.array([np.dot(self.derivative[i].reshape((self.size, 1)), 
-      #                                 self.input_data[i].reshape((1,self.input_size))) for i in range(self.batch_size)])
-      self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
+      #self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
+      self.gradient = self.derivative.reshape((self.batch_size,self.size, 1)) * self.input_data.reshape(self.batch_size,1, self.input_size)
     else:
       self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
       self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
@@ -404,6 +403,7 @@ class FeedLayer (baseLayer):
     return self.back_data
   
   def update(self, _eta = None):
+    pass
     """
     Input eta specifies update constant of proportionality (i.e. `learning' rate).
     Returns Delta_weights, Delta_biases.

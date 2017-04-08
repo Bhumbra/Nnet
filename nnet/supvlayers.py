@@ -67,7 +67,8 @@ class CostLayer (FeedLayer):
       self.output_data = _output_data.reshape([self.batch_size, self.size])
       self.cost_data = self.costfun(self.output_data, self.output)
       self.derivative = self.costder(self.output - self.output_data, self.scores, self.transder, self.output)
-      self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
+      #self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
+      self.gradient = self.derivative.reshape((self.batch_size,self.size, 1)) * self.input_data.reshape(self.batch_size,1, self.input_size)
     else:
       self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
       self.cost_data = self.costfun(self.output_data, self.output)
