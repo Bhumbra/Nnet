@@ -48,18 +48,20 @@ class baseLayer (object):
   methods are combined in the baseLayer.forward(_input_data) method.
 
   """
-  dims = None     # layer dimensions within each feature map
   maps = None     # number of feature maps
+  dims = None     # layer dimensions within each feature map
+  Dims = None     # np.hstack( (maps, dims) ) 
   size = None     # total number of nodes per feature map
   Size = None     # total number of nodes across all features maps
   transfunc = None # transfer function string
   transfer = None  # transfer function
   transder = None  # transfer derivative
   input_layer = None   # Input layer
-  input_dims = None    # Input layer dimensnions
   input_maps = None    # Input layer maps
+  input_dims = None    # Input layer dimensions
+  input_Dims = None    # Input layer Dimensions
   input_size = None    # Input layer size
-  input_Size = None    # Input layer size
+  input_Size = None    # Input layer Size
   coef_shape = None     # Weighting coefficient dimensions
   offs_shape = None     # Bias offsets dimensions
   batch_size = None    # len(input_data)
@@ -131,6 +133,7 @@ class baseLayer (object):
     
     self.input_layer = None   
     self.input_dims = None    
+    self.input_Dims = None    
     self.input_maps = None    
     self.input_size = None
     self.input_Size = None
@@ -171,6 +174,7 @@ class baseLayer (object):
     if self.input_maps is None: self.input_maps = self.maps
 
     self.input_size = np.prod(self.input_dims)
+    self.input_Dims = np.hstack( (self.input_maps, self.input_dims) )
     self.input_Size = self.input_maps * self.input_size 
 
     # Occam's razer should apply if input and current layer have single feature maps
@@ -226,6 +230,7 @@ class baseLayer (object):
       raise ValueError("Relative dimension specfication incommensurate with previous layer")
 
     self.size = np.prod(self.dims)
+    self.Dims = np.hstack( (self.maps, self.dims) )
     self.Size = self.maps * self.size
     
     if self.single_map:
@@ -379,7 +384,8 @@ class FeedLayer (baseLayer):
       self.output_data = _output_data.reshape([self.batch_size, self.size])
       self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
       #self.gradient = np.einsum('ik,il->ikl', self.derivative, self.input_data)
-      self.gradient = self.derivative.reshape((self.batch_size,self.size, 1)) * self.input_data.reshape(self.batch_size,1, self.input_size)
+      self.gradient = self.derivative.reshape((self.batch_size,self.size, 1)) * \
+                      self.input_data.reshape(self.batch_size,1, self.input_Size)
     else:
       self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
       self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
@@ -394,9 +400,9 @@ class FeedLayer (baseLayer):
     Note that no backpropagation calculation is performed without a known input layer.
     
     """
+    if self.input_layer is None: return self.back_data
 
     # Now the gradient calculation and back-propagation
-    if self.input_layer is None: return self.back_data
     self.back_data = np.dot(self.derivative, self.weight_coefs)
     if self.single_map and self.input_maps == 1: return self.back_data # simplicity propagated
     self.back_data = self.back_data.reshape(np.hstack([self.batch_size, self.input_maps, self.input_dims]))

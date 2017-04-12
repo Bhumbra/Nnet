@@ -50,15 +50,36 @@ class strideLayer(FeedLayer):
   Window = None  # np.prod(window)
 
   def setDims(self, *args):
-    FeedLayer.setDims(self, *args)
-    self.stride = None
 
+    self.dims = None     
+    self.maps = None    
+
+    # Initialise layer dimensions
     array_count = 0
     for arg in args:
       if isarray(arg):
         array_count += 1
-        if array_count == 2:
+        if self.dims is None:
+          self.dims = np.atleast_1d(arg)
+        elif array_count == 2:
           self.stride = np.atleast_1d(arg)
+        else:
+          raise ValueError("Unexpected number of array-like input arguments.")
+
+    for arg in args:
+      if isint(arg):
+        if self.dims is None:
+          self.dims = np.atleast_1d([arg])
+        elif self.maps is None:
+          self.maps = int(arg)
+        else:
+          raise ValueError("Unexpected number of integer input arguments.")
+
+    # If dims has been initialised, default feature maps 
+    if self.dims is not None:
+      if self.maps is None:
+        self.maps = 1
+    self.stride = None
 
   def _setParamDims(self): 
     # this overloads feedLayer._setParamDims and is guaranteed to be invoked at the right time
@@ -111,6 +132,8 @@ class strideLayer(FeedLayer):
     self.dims[cases] = 1 + (self.input_dims[cases] - self.window[cases]) / self.stride[cases]
    
     self.Window = np.prod(self.window)
+    self.Dims = np.hstack( (self.maps, self.dims) )
+
     self.size = np.prod(self.dims)
     self.Size = self.maps * self.size
 
@@ -162,6 +185,7 @@ class PoolLayer(strideLayer):
       self.pool_mode = _pool_mode
     elif self.pool_mode is None:
       self.pool_mode = POOLMODE_DEFAULT
+    self.setBatchSize(self.batch_size)
 
   def setBatchSize(self, _batch_size = 0): # this formally assigns the mode and index
     """ 
@@ -285,6 +309,7 @@ class ConvLayer(strideLayer):
       self.conv_mode = _conv_mode
     elif self.conv_mode is None:
       self.conv_mode = CONVMODE_DEFAULT
+    self.setBatchSize(self.batch_size)
 
   def setBatchSize(self, _batch_size = 1): # this assigns convolution mode
     """ 
@@ -309,7 +334,7 @@ class ConvLayer(strideLayer):
                              np.hstack((self.stride)))
     else:
       self.conv_axes = np.arange(2, 2+len(self.dims))
-      self.conv_grad_ind0 = self.dims + self.stride - 1
+      self.conv_grad_ind0 = self.dims * self.stride - 1
       self.conv_grad_ind1 = self.conv_grad_ind0 + self.window
 
   def feedforward(self, _input_data = []):
@@ -330,14 +355,13 @@ class ConvLayer(strideLayer):
 
   def feedforward_fft(self, _input_data = []):
     self.input_data = np.reshape(_input_data, np.hstack((self.batch_size, self.input_maps, self.input_dims)))
-    self.kernel = reverse(self.weight_coefs, range(1, len(self.dims)))
+    self.kernel = reverse(self.weight_coefs, self.conv_axes-1)
     self.scores = subsample(conv(self.input_data, self.kernel, 'valid', axes = self.conv_axes), self.stride) + \
                   self.bias_offsets.reshape(np.hstack((1, self.bias_offsets.shape)))
 
     return self.scores 
 
   def feedback(self, _output_data = []):
-
     _output_data = np.asarray(_output_data)
 
     # Check batch-size 
@@ -354,10 +378,11 @@ class ConvLayer(strideLayer):
       return self.feedback_call[self.mode](_output_data)
 
   def backpropagate(self):
-      return self.backpropagate_call[self.mode]()
+    if self.input_layer is None: return self.back_data
+    return self.backpropagate_call[self.mode]()
 
   def feedback_ranger(self, _output_data = []):
-    self.output_data = _output_data.reshape([self.batch_size, self.maps, self.size])
+    self.output_data = _output_data.reshape(np.hstack([self.batch_size, self.Dims]))
     self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
 
     self.gradient = np.einsum('hijk,hik->hij', np.swapaxes(self.input_conv, 2, 3),
@@ -366,10 +391,8 @@ class ConvLayer(strideLayer):
     return self.derivative
 
   def backpropagate_ranger(self):
-
-    if self.input_layer is None: return self.back_data
-    _back_data = self.derivatives.reshape(np.hstack([self.batch_size, self.maps, self.size, 1])) * self.weight_coefs.reshape(
-                                                                          np.hstack([1, self.maps, 1, np.prod(self.window)]))
+    _back_data = self.derivative.reshape(np.hstack([self.batch_size, self.input_maps, self.input_size, 1])) * \
+                 self.weight_coefs.reshape(np.hstack([1, self.maps, 1, np.prod(self.window)]))
                  
     self.back_data = np.zeros(self.batch_size*self.input_Size, dtype = float)
     np.add.at(self.back_data, self.strides, _back_data)
@@ -384,11 +407,10 @@ class ConvLayer(strideLayer):
     self.deriv_conv = reverse(intrapad(self.derivative, self.stride), self.conv_axes)
     self.gradient = subarray(conv(self.deriv_conv, self.input_data, axes = self.conv_axes), 
                              self.conv_grad_ind0, self.conv_grad_ind1)
-    
+      
     return self.derivative
 
   def backpropagate_fft(self):
-
     if self.input_layer is None: return self.back_data
     self.back_data = subarray(conv(self.deriv_conv, self.kernel, axes = self.conv_axes),
                               -1, -np.array(self.input_size)-1, -1)

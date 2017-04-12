@@ -7,9 +7,10 @@ from time import time
 epochs = 3
 bs = 10
 eta = 0.1
-Arch = [100, 10] 
+#Arch = [100, 10] 
+Arch = [[-5,-5], (-2,-2), 100, 10] 
 maps = 20
-dv = 10000
+dv = 2000
 transfunc = 'sigm'
 convmode = 1 # 0 default, 1 ranger, 2 fft
 poolmode = 1 # 0 default, 1 ranger, 2 axes
