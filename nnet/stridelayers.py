@@ -14,13 +14,15 @@ will be most useful here.
 from nnet.baselayers import *
 from nnet.ranger import *
 
-CONVMODE_DEFAULT = 0
-CONVMODE_RANGER = 1
-CONVMODE_FFT = 2
-
 POOLMODE_DEFAULT = 0
 POOLMODE_RANGER = 1
 POOLMODE_AXES = 2
+POOLMODE_TEST1 = -1
+
+CONVMODE_DEFAULT = 0
+CONVMODE_RANGER = 1
+CONVMODE_FFT = 2
+CONVMODE_TEST1 = -1
 
 #-------------------------------------------------------------------------------
 class strideLayer(FeedLayer):
@@ -167,14 +169,20 @@ class PoolLayer(strideLayer):
   mode = None          # mode actually used
   strides = None        # flattened indices
   input_pool = None    # input for pooling
+  deriv_pool = None    # derivative for back-pooling
   ind_pooled = None    # index for pooled range
   arg_pooled = None    # argument output from pooling
 
   def __init__(self, *args):
     self.initialise(*args)
-    self.feedforward_call = {POOLMODE_RANGER:self.feedforward_ranger, POOLMODE_AXES:self.feedforward_axes}
+    # Note that the self.feedback() function has only one way to calculate the derivative
 
-    # Back-propagation still uses ranger.strider so we do not polymorph self.backward
+    self.feedforward_call = {POOLMODE_TEST1:self.feedforward_test1,
+                             POOLMODE_RANGER:self.feedforward_ranger, 
+                             POOLMODE_AXES:self.feedforward_axes}
+    self.backpropagate_call = {POOLMODE_TEST1:self.backpropagate_test1,
+                               POOLMODE_RANGER:self.backpropagate_ranger, 
+                               POOLMODE_AXES:self.backpropagate_axes}
 
   def initialise(self, *args):
     strideLayer.initialise(self, *args)
@@ -196,22 +204,42 @@ class PoolLayer(strideLayer):
 
     # Pooling mode defaults to ranger
     
-    self.mode = POOLMODE_RANGER
-    if np.all(self.stride == self.window):
-      if self.pool_mode != POOLMODE_RANGER:
+    self.mode = self.pool_mode
+
+    if self.pool_mode == POOLMODE_DEFAULT:
+      if np.all(self.stride == self.window):
         self.mode = POOLMODE_AXES
+      else:
+        self.mode = POOLMODE_RANGER
 
     # Whatever mode, we need self.stride for the back-propagation (note this differs from ConvLayer())
-    self.strides = strider(np.hstack((self.batch_size, self.input_maps, self.input_dims)),
-                           np.hstack((self.window)), 
-                           np.hstack((self.stride)))
+    if self.mode == POOLMODE_TEST1:
+      self.strides = strider(np.hstack((self.batch_size, self.input_maps, self.input_dims)),
+                             np.hstack((self.window)), 
+                             np.hstack((self.stride)))
 
-    strides_num = self.strides.shape[2]
+      strides_num = self.strides.shape[-2] # number of strides per map
 
-    inner_ind = np.tile(np.arange(strides_num).reshape(1, 1, strides_num), (self.batch_size, self.maps, 1))
-    middl_ind = np.tile(np.arange(self.maps).reshape(1, self.maps, 1), (self.batch_size, 1, strides_num))
-    outer_ind = np.tile(np.arange(self.batch_size).reshape(self.batch_size, 1, 1), (1, self.maps, strides_num))
-    self.ind_pooled =  [outer_ind, middl_ind, inner_ind, None]
+      inner_ind = np.tile(np.arange(strides_num).reshape(1, 1, strides_num), (self.batch_size, self.maps, 1))
+      middl_ind = np.tile(np.arange(self.maps).reshape(1, self.maps, 1), (self.batch_size, 1, strides_num))
+      outer_ind = np.tile(np.arange(self.batch_size).reshape(self.batch_size, 1, 1), (1, self.maps, strides_num))
+      self.ind_pooled =  [outer_ind, middl_ind, inner_ind, None]
+
+    else:
+      self.strides = strider(np.hstack((self.input_maps, self.input_dims)),
+                             np.hstack((self.window)), 
+                             np.hstack((self.stride)))
+
+      strides_num = self.strides.shape[-2] # number of strides per map
+
+      inner_ind = np.tile(np.arange(strides_num).reshape(1, strides_num), (self.maps, 1))
+      outer_ind = np.tile(np.arange(self.maps).reshape(self.maps, 1), (1, strides_num))
+      self.ind_pooled =  [outer_ind, inner_ind, None]
+
+    self.scores = np.empty(np.hstack((self.batch_size, self.maps, self.dims)), dtype = float)
+    self.arg_pooled = np.empty(np.hstack((self.batch_size, self.maps, strides_num)), dtype = int)
+    self.back_pool = np.empty(np.hstack((self.batch_size, self.maps, strides_num, self.Window)), dtype = float)
+    self.back_data = np.empty(np.hstack((self.batch_size, self.input_maps, self.input_dims)), dtype = float)
 
   def feedforward(self, _input_data = []):
     if self.batch_size != len(_input_data):
@@ -219,30 +247,39 @@ class PoolLayer(strideLayer):
     if self.batch_size:
       return self.feedforward_call[self.mode](_input_data)
 
-  def feedforward_ranger(self, _input_data = []):
+  def feedforward_test1(self, _input_data = []):
     self.input_data = _input_data
     self.input_pool = np.take(self.input_data, self.strides)
     self.arg_pooled = np.argmax(self.input_pool, axis = -1)
     self.ind_pooled[-1] = self.arg_pooled
     self.scores = np.reshape(self.input_pool[tuple(self.ind_pooled)],
-                             np.hstack((self.batch_size, self.maps, self.dims)))
+                             np.hstack((self.batch_size, self.Dims)))
+    return self.scores
+
+  def feedforward_ranger(self, _input_data = []):
+    self.input_data = _input_data
+    for i in range(self.batch_size):
+      self.input_pool = np.take(self.input_data[i], self.strides)
+      self.arg_pooled[i] = np.argmax(self.input_pool, axis = -1)
+      self.ind_pooled[-1] = self.arg_pooled[i]
+      self.scores[i] = np.reshape(self.input_pool[tuple(self.ind_pooled)], self.Dims)
     return self.scores
 
   def feedforward_axes(self, _input_data = []):
     self.input_data = _input_data
-    self.input_pool = poolaxes(self.input_data, self.window)
-    self.arg_pooled = np.argmax(self.input_pool, axis = -1)
-    self.ind_pooled[-1] = self.arg_pooled
-    self.scores = np.reshape(self.input_pool[tuple(self.ind_pooled)],
-                             np.hstack((self.batch_size, self.maps, self.dims)))
+    for i in range(self.batch_size):
+      self.input_pool = poolaxes(self.input_data[i], self.window)
+      self.arg_pooled[i] = np.argmax(self.input_pool, axis = -1)
+      self.ind_pooled[-1] = self.arg_pooled[i]
+      self.scores[i] = np.reshape(self.input_pool[tuple(self.ind_pooled)], self.Dims)
+
     return self.scores
 
   def feedback(self, _output_data = []):
     """
     Back-propagates errors through layer. Note there are no gradients since there are no weights to updates.
-    Outputs the back-propagated data.
+    Outputs the derivatives.
     """
-
     _output_data = np.asarray(_output_data)
 
     # Check batch-size 
@@ -264,9 +301,33 @@ class PoolLayer(strideLayer):
 
   def backpropagate(self):
     if self.input_layer is None: return self.back_data
-    self.back_data = np.zeros(np.hstack((self.batch_size, self.input_maps, self.input_dims)), dtype = float)
-    self.back_data.put(self.arg_pooled, self.derivative)
+    return self.backpropagate_call[self.mode]()
 
+  def backpropagate_test1(self):
+    self.deriv_pool = self.derivative.reshape(self.batch_size, self.maps, self.size)
+    self.back_data = self.back_data.ravel()
+    self.back_data.fill(0.)
+    np.add.at(self.back_data, self.strides[tuple(self.ind_pooled)], self.deriv_pool)
+    self.back_data = self.back_data.reshape(np.hstack((self.batch_size, self.input_Dims)))
+    return self.back_data
+
+  def backpropagate_ranger(self):
+    self.deriv_pool = self.derivative.reshape(self.batch_size, self.maps, self.size)
+    self.back_data = self.back_data.reshape( (self.batch_size, -1) )
+    self.back_data.fill(0.)
+    for i in range(self.batch_size):
+      self.ind_pooled[-1] = self.arg_pooled[i]
+      np.add.at(self.back_data[i], self.strides[tuple(self.ind_pooled)], self.deriv_pool[i])
+    self.back_data = self.back_data.reshape(np.hstack((self.batch_size, self.input_Dims)))
+    return self.back_data
+
+  def backpropagate_axes(self):
+    self.deriv_pool = self.derivative.reshape(self.batch_size, self.maps, self.size)
+    self.back_pool.fill(0.)
+    for i in range(self.batch_size):
+      self.ind_pooled[-1] = self.arg_pooled[i]
+      self.back_pool[i][tuple(self.ind_pooled)] = self.deriv_pool[i]
+      self.back_data[i] = unpoolaxes(self.back_pool[i], self.window, self.input_Dims)
     return self.back_data
 
   def update(self, *args): # Pool layers do not update
@@ -296,9 +357,15 @@ class ConvLayer(strideLayer):
 
   def __init__(self, *args):
     self.initialise(*args)
-    self.feedforward_call  = {CONVMODE_RANGER:self.feedforward_ranger,  CONVMODE_FFT:self.feedforward_fft}
-    self.feedback_call = {CONVMODE_RANGER:self.feedback_ranger, CONVMODE_FFT:self.feedback_fft}
-    self.backpropagate_call = {CONVMODE_RANGER:self.backpropagate_ranger, CONVMODE_FFT:self.backpropagate_fft}
+    self.feedforward_call  = {CONVMODE_TEST1:self.feedforward_test1,
+                              CONVMODE_RANGER:self.feedforward_ranger,  
+                              CONVMODE_FFT:self.feedforward_fft}
+    self.feedback_call =     {CONVMODE_TEST1:self.feedback_test1,
+                              CONVMODE_RANGER:self.feedback_ranger, 
+                              CONVMODE_FFT:self.feedback_fft}
+    self.backpropagate_call = {CONVMODE_TEST1:self.backpropagate_test1,
+                               CONVMODE_RANGER:self.backpropagate_ranger, 
+                               CONVMODE_FFT:self.backpropagate_fft}
 
   def initialise(self, *args):
     strideLayer.initialise(self, *args)
@@ -322,16 +389,25 @@ class ConvLayer(strideLayer):
     # Pooling mode defaults to ranger
     
     self.mode = self.conv_mode
+
     if self.mode == CONVMODE_DEFAULT: 
-      if np.all(self.stride == self.window):
+      if np.all(self.stride == self.window) or self.input_layer is None:
         self.mode = CONVMODE_RANGER
       else:
         self.mode = CONVMODE_FFT
 
-    if self.mode == CONVMODE_RANGER:
+    if self.mode == CONVMODE_TEST1:
       self.strides = strider(np.hstack((self.batch_size, self.input_maps, self.input_dims)),
                              np.hstack((self.window)), 
                              np.hstack((self.stride)))
+    if self.mode == CONVMODE_RANGER:
+      self.strides = strider(np.hstack((self.input_maps, self.input_dims)),
+                             np.hstack((self.window)), 
+                             np.hstack((self.stride)))
+      self.input_conv = np.empty( np.hstack((self.batch_size, self.strides.shape)), dtype = float )
+      self.scores = np.empty( np.hstack((self.batch_size, self.Dims)), dtype = float)
+      self.gradient = np.empty( np.hstack((self.batch_size, self.coef_shape)), dtype = float)
+      self.back_data = np.empty( np.hstack((self.batch_size, self.input_Dims)), dtype = float )
     else:
       self.conv_axes = np.arange(2, 2+len(self.dims))
       self.conv_grad_ind0 = self.dims * self.stride - 1
@@ -343,13 +419,23 @@ class ConvLayer(strideLayer):
     if self.batch_size:
       return self.feedforward_call[self.mode](_input_data)
 
-  def feedforward_ranger(self, _input_data = []):
+  def feedforward_test1(self, _input_data = []):
     self.input_data = _input_data
     self.input_conv = np.take(self.input_data, self.strides)
-    self.scores = np.einsum('hijk,ik->hij', self.input_conv, 
-                  self.weight_coefs.reshape((self.maps, self.Window))).reshape(
+    self.kernel = self.weight_coefs.reshape((self.maps, self.Window))
+    self.scores = np.einsum('hijk,ik->hij', self.input_conv, self.kernel).reshape(
                   np.hstack([self.batch_size, self.maps, self.dims])) + \
-                  self.bias_offsets.reshape(np.hstack([1, self.bias_offsets.shape]))
+                  self.bias_offsets.reshape(np.hstack([1, self.maps, 1, 1]))
+
+    return self.scores
+  
+  def feedforward_ranger(self, _input_data = []):
+    self.input_data = _input_data
+    self.kernel = self.weight_coefs.reshape((self.maps, self.Window))
+    for i in range(self.batch_size):
+      self.input_conv[i] = np.take(self.input_data[i], self.strides)
+      self.scores[i] = np.einsum('ijk,ik->ij', self.input_conv[i], self.kernel).reshape(
+                       self.Dims) + self.bias_offsets.reshape((self.maps, 1, 1))
 
     return self.scores
 
@@ -381,7 +467,7 @@ class ConvLayer(strideLayer):
     if self.input_layer is None: return self.back_data
     return self.backpropagate_call[self.mode]()
 
-  def feedback_ranger(self, _output_data = []):
+  def feedback_test1(self, _output_data = []):
     self.output_data = _output_data.reshape(np.hstack([self.batch_size, self.Dims]))
     self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
 
@@ -390,12 +476,37 @@ class ConvLayer(strideLayer):
                               np.hstack([self.batch_size, self.coef_shape]))
     return self.derivative
 
-  def backpropagate_ranger(self):
+  def backpropagate_test1(self):
     _back_data = self.derivative.reshape(np.hstack([self.batch_size, self.input_maps, self.input_size, 1])) * \
                  self.weight_coefs.reshape(np.hstack([1, self.maps, 1, np.prod(self.window)]))
                  
     self.back_data = np.zeros(self.batch_size*self.input_Size, dtype = float)
     np.add.at(self.back_data, self.strides, _back_data)
+    self.back_data = self.back_data.reshape(np.hstack([self.batch_size, self.maps, self.input_size]))
+
+    return self.back_data
+
+  def feedback_ranger(self, _output_data = []):
+    self.output_data = _output_data.reshape(np.hstack([self.batch_size, self.Dims]))
+    self.derivative = self.output_data if self.transder is None else self.output_data * self.transder(self.scores, self.output)
+    self.deriv_conv = self.derivative.reshape((self.batch_size, self.maps, self.size))
+
+    for i in range(self.batch_size):
+      self.gradient[i] = np.einsum('ijk,ik->ij', np.swapaxes(self.input_conv[i], 1, 2),
+                                   self.deriv_conv[i]).reshape(self.coef_shape)
+
+    return self.derivative
+
+  def backpropagate_ranger(self):
+    _back_data = self.derivative.reshape(np.hstack([self.batch_size, self.input_maps, self.input_size, 1])) * \
+                 self.weight_coefs.reshape(np.hstack([1, self.maps, 1, np.prod(self.window)]))
+                 
+    self.back_data = self.back_data.ravel()
+    self.back_data[:] = 0.
+
+    for i in range(self.batch_size):
+      np.add.at(self.back_data[i], self.strides, _back_data[i])
+
     self.back_data = self.back_data.reshape(np.hstack([self.batch_size, self.maps, self.input_size]))
 
     return self.back_data

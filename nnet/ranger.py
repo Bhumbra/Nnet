@@ -556,8 +556,8 @@ def unpoolaxes(X, _E, _O):
   O = final output dimensions
   '''
 
-  if X.ndim != 2:
-    raise ValueError("First input must be two-dimensional")
+  if X.ndim < 2:
+    raise ValueError("First input must be at least two-dimensional")
   E, O = np.atleast_1d(_E), np.atleast_1d(_O)
   n = len(E)
 
