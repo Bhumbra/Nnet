@@ -7,9 +7,9 @@ from time import time
 epochs = 3
 bs = 10
 eta = 0.1
-#Arch = [100, 10] 
-Arch = [[-5,-5], (-2,-2), 100, 10] 
+Arch = [100, 10] 
 #Arch = [[-5,-5], (-2,-2), 10] 
+#Arch = [[-5,-5], (-2,-2), 100, 10] 
 maps = 20
 dv = 2000
 transfunc = 'sigm'
@@ -83,6 +83,7 @@ for i in range(epochs):
     start, end = end, end+bs
     done = end >= len(input_data)
     k += 1
+  print("".join(("   ", str(time()-t),"s: ", str(start), "/" + str(len(input_data)) ) ))
   for h in range(nArch):
     self = Stack[h]
     if not(h):

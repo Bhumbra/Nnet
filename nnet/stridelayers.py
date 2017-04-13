@@ -263,6 +263,7 @@ class PoolLayer(strideLayer):
       self.arg_pooled[i] = np.argmax(self.input_pool, axis = -1)
       self.ind_pooled[-1] = self.arg_pooled[i]
       self.scores[i] = np.reshape(self.input_pool[tuple(self.ind_pooled)], self.Dims)
+
     return self.scores
 
   def feedforward_axes(self, _input_data = []):
