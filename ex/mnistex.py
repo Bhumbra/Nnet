@@ -7,7 +7,7 @@ from time import time
 epochs = 3
 bs = 10
 eta = 0.1
-Arch = [100, 10] 
+Arch = [30, 10] 
 #Arch = [[-5,-5], (-2,-2), 10] 
 #Arch = [[-5,-5], (-2,-2), 100, 10] 
 maps = 20

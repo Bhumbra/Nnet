@@ -1,4 +1,2 @@
 # Nnet
-Experimental deep learning framework for Python with only NumPy and SciPy dependencies.
-
-
+Experimental biologically-inspired deep learning framework for Python using NumPy and SciPy.
